@@ -188,7 +188,7 @@ BUG FIXES:
 * Fix Guacamole Windows VM image selections by aligning schema enums/defaults with supported image options in Windows and review VM templates. ([#4963](https://github.com/microsoft/AzureTRE/issues/4963))
 * Remove deprecated `soft_delete_enabled` setting from `azurerm_recovery_services_vault` in base workspace template. ([#4967](https://github.com/microsoft/AzureTRE/issues/4967))
 * Pin MKDocs to v1 to prevent incompatible upgrade. ([#5009](https://github.com/microsoft/AzureTRE/issues/5009))
-* Fix clean validation workflow failing due to `az config` checksum mismatch by replacing `az config set` with the `AZURE_EXTENSION_USE_DYNAMIC_INSTALL` environment variable ([#4971](https://github.com/microsoft/AzureTRE/issues/4971))
+* Fix clean validation workflow by replacing `az config set` (experimental, causing checksum errors) with the `AZURE_EXTENSION_USE_DYNAMIC_INSTALL` environment variable and explicitly installing the `azure-firewall` extension via `az extension add` ([#4971](https://github.com/microsoft/AzureTRE/issues/4971))
 
 COMPONENTS:
 
