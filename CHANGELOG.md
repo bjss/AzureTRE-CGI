@@ -6,6 +6,7 @@
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
 
 ENHANCEMENTS:
+* Register AML compute for branch validation and add private AML service and compute lifecycle checks with Automatic workspace prerequisites and bounded cleanup. ([#5138](https://github.com/microsoft/AzureTRE/issues/5138))
 * Add independent export review-VM validation with a private synthetic upload, review-data hash verification and automatic VM deletion. ([#5143](https://github.com/microsoft/AzureTRE/issues/5143))
 * Register the OpenAI bundle for branch validation, add GPT-5.1 as the default model and check regional model and quota prerequisites before its private lifecycle test. (`tre-workspace-service-openai` 1.1.0) ([#5150](https://github.com/microsoft/AzureTRE/issues/5150))
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
