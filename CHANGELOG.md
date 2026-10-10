@@ -30,6 +30,7 @@ ENHANCEMENTS:
 * Add independent private OHDSI lifecycle validation with callback, firewall, shared DNS preservation and bounded cleanup checks. ([#5149](https://github.com/microsoft/AzureTRE/issues/5149))
 * Add a bundle evidence helper that records the deployed template version of a resource that a test gives to it, without the resource properties. ([#5302](https://github.com/microsoft/AzureTRE/pull/5302))
 * Add a `Request-Id` header with the trace ID to each API response, also to an HTTP 500. The E2E operation poll already logs this header, so a failed poll can be found in App Insights. (`api` 0.29.0) ([#5202](https://github.com/microsoft/AzureTRE/issues/5202))
+* Register AML compute for branch validation and add private AML service and compute lifecycle checks with Automatic workspace prerequisites and bounded cleanup. ([#5138](https://github.com/microsoft/AzureTRE/issues/5138))
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
 * Enable `user_management_enabled`, `auto_workspace_group_creation`, and `auto_grant_workspace_consent` by default in `config.sample.yaml` for a better out-of-the-box experience ([#5050](https://github.com/microsoft/AzureTRE/issues/5050))
 * Add shared repository instructions and TRE-prefixed component skills for agent-assisted development, security review, validation and troubleshooting. ([#5111](https://github.com/microsoft/AzureTRE/issues/5111))
