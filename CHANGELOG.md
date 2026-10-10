@@ -32,6 +32,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Fill the missing Switzerland North Databricks storage and Event Hubs endpoints for DNS lookup and firewall rules. (`tre-service-databricks` 1.0.20) ([#5140](https://github.com/microsoft/AzureTRE/issues/5140))
 * Clean up backup-test workspaces after failed provisioning. ([#5135](https://github.com/microsoft/AzureTRE/issues/5135))
 * Update `aiohttp` from 3.14.3 to 3.14.4 in `api_app`, `resource_processor`, and the CLI to address security advisories. (`API` 0.28.7, `resource_processor` 0.13.15, `CLI` 0.2.13) ([#5270](https://github.com/microsoft/AzureTRE/pull/5270))
 * Rename a test variable in the E2E polling tests so that CodeQL stops reporting false clear-text logging alerts. ([#5266](https://github.com/microsoft/AzureTRE/pull/5266))
