@@ -275,6 +275,17 @@ class BundleSelectionTests(unittest.TestCase):
                 self.assertIn("tre-workspace-base", report["declared_prerequisites"])
                 self.assertTrue(any("Notebook" in limit or "notebook" in limit for limit in report["limitations"]))
 
+    def test_export_review_selects_only_its_private_lifecycle(self):
+        result, report = self.run_selector("--bundle", "tre-service-guacamole-export-reviewvm", "--collect-only")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            report["collected_tests"], ["test_airlock_export_review.py::test_airlock_export_review_vm_flow"]
+        )
+        self.assertEqual(report["status"], "not_run")
+        self.assertFalse(report["full_lifecycle_proven"])
+        self.assertIn("tre-service-guacamole-windowsvm", report["declared_prerequisites"])
+        self.assertIn("synthetic-review-data", report["coverage"])
+
     def test_observed_deployment_evidence_excludes_properties(self):
         with tempfile.TemporaryDirectory() as directory:
             report = bundle_evidence.BundleReport(Path(directory) / "report.json", {})
