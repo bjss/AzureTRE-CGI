@@ -20,13 +20,17 @@ Scheduled cleanup continues to use the `ci_git_ref` tags. Retained vaults remain
 
 ### Forks that share a subscription
 
-A fork can run CI in the same Azure subscription as another repository. Set the `CI_ENV_PREFIX` repository variable in the fork to 3 characters other than `tre`, for example `frk`.
+A fork can run CI in the same Azure subscription as another repository. Set the `CI_ENV_PREFIX` repository variable in the fork to a prefix that no other Azure TRE repository uses.
+The prefix has 3 characters: a lowercase letter, then 2 lowercase letters or digits. This documentation uses `frk` as an example only. Do not copy it.
 Set it as a repository variable, not an environment variable, so that every job reads the same value.
 The prefix replaces `tre` at the start of every CI environment name, for example `rg-frk1a2b3c4d`. The 3 characters and the 8-character hash fill the 11-character `TRE_ID` limit.
 
 Only `microsoft/AzureTRE` has a default prefix. If `CI_ENV_PREFIX` is not set in another repository, PR deployment, branch deployment, cleanup and `/test-destroy-env` stop with an error.
 Use a prefix other than `tre` in every fork, also in a fork with its own subscription. Storage account, container registry and Key Vault names are unique across all of Azure, so a fork with `tre` can collide with upstream PR environments in the same location.
 Set `tre` in a fork only to keep the names of existing environments.
+
+If 2 repositories use the same prefix, they get the same names for the same PR number or branch, because the name hash does not include the repository.
+The `ci_repository` tag stops each CI from deleting or taking over the other's groups, so the deployment of the second repository fails. Choose a unique prefix to prevent this, also when the repositories use different subscriptions.
 
 CI also tags new core and management resource groups with `ci_repository`, which holds the GitHub repository name. Scheduled cleanup, `/test-destroy-env` and bootstrap lease recovery:
 
@@ -232,7 +236,7 @@ Configure variables used in the deployment workflow:
 | `FIREWALL_SKU` | Optional. The SKU of the Azure Firewall instance. Default value is `Standard`. Allowed values [`Basic`, `Standard`, `Premium`]. See [Azure Firewall SKU feature comparison](https://learn.microsoft.com/en-us/azure/firewall/choose-firewall-sku). |
 | `APP_GATEWAY_SKU` | Optional. The SKU of the Application Gateway. Default value is `Standard_v2`. Allowed values [`Standard_v2`, `WAF_v2`] |
 | `ENABLE_CMK_ENCRYPTION` | Optional. Default is `false`, if set to `true` customer-managed key encryption will be enabled for all supported resources. |
-| `CI_ENV_PREFIX` | Required outside `microsoft/AzureTRE`. The 3-character prefix of PR and branch CI environment names. Only `microsoft/AzureTRE` has the default value `tre`. Use another value in every fork, because some Azure resource names are globally unique. See [Forks that share a subscription](#forks-that-share-a-subscription). |
+| `CI_ENV_PREFIX` | Required outside `microsoft/AzureTRE`. The 3-character prefix of PR and branch CI environment names: a lowercase letter, then 2 lowercase letters or digits. Only `microsoft/AzureTRE` has the default value `tre`. Every fork uses a prefix that no other Azure TRE repository uses, because some Azure resource names are globally unique. See [Forks that share a subscription](#forks-that-share-a-subscription). |
 
 ### Deploy the TRE using the workflow
 
