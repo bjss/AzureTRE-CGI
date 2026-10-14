@@ -18,6 +18,48 @@ PR comment workflow changes take effect after merge. Before merge, use the branc
 For an upstream PR, it also cleans the tagged branch environments. Cleanup refuses conflicting ownership tags and shares deployment concurrency.
 Scheduled cleanup continues to use the `ci_git_ref` tags. Retained vaults remain subject to their existing soft-delete and purge protection policies.
 
+### Forks that share a subscription
+
+A fork can run CI in the same Azure subscription as another repository. Set the `CI_ENV_PREFIX` repository variable in the fork to 3 characters other than `tre`, for example `frk`.
+Set it as a repository variable, not an environment variable, so that every job reads the same value.
+The prefix replaces `tre` at the start of every CI environment name, for example `rg-frk1a2b3c4d`. The 3 characters and the 8-character hash fill the 11-character `TRE_ID` limit.
+
+Only `microsoft/AzureTRE` has a default prefix. If `CI_ENV_PREFIX` is not set in another repository, PR deployment, branch deployment, cleanup and `/test-destroy-env` stop with an error.
+Use a prefix other than `tre` in every fork, also in a fork with its own subscription. Storage account, container registry and Key Vault names are unique across all of Azure, so a fork with `tre` can collide with upstream PR environments in the same location.
+Set `tre` in a fork only to keep the names of existing environments.
+
+CI also tags new core and management resource groups with `ci_repository`, which holds the GitHub repository name. Scheduled cleanup, `/test-destroy-env` and bootstrap lease recovery:
+
+* Select only groups that start with `rg-<prefix>`.
+* Refuse groups that another repository tagged with `ci_repository`.
+* Treat groups without `ci_repository` as groups from before the tag existed. A repository that uses the `tre` prefix owns these groups only if it is `microsoft/AzureTRE`.
+
+Bootstrap also stops if the management resource group has a `ci_repository` tag for another repository. A fork that uses the `tre` prefix also stops on an untagged PR or branch management group.
+
+The fork must also use its own main environment values: `TRE_ID`, `ACR_NAME`, `MGMT_RESOURCE_GROUP_NAME`, `MGMT_STORAGE_ACCOUNT_NAME` and `ENCRYPTION_KV_NAME`. Main deployments and the main workspace cleanup use these values directly.
+
+If the fork has CI environments from before this change, destroy them with `/test-destroy-env` before the change reaches the fork's default branch. PR comment workflows run from the default branch.
+The command from before this change has no repository check. Use it only for a PR number or branch that has no upstream environment. Leave other untagged `rg-tre` groups to the upstream scheduled cleanup.
+After the change, the fork's cleanup does not select these untagged `rg-tre` groups. Do not set `CI_ENV_PREFIX` to `tre` for a short time to remove them in a shared subscription.
+
+Merge or rebase the default branch into a fork branch before you dispatch the branch deployment workflow. An older branch creates untagged `rg-tre` groups, and the upstream cleanup treats them as upstream groups.
+
+If you rename or transfer the repository, cleanup refuses the groups that have the old name in `ci_repository`. Delete these groups manually, or change their tag to the new name.
+
+The `validate` mode of the cleanup workflow needs a `CI_ENV_PREFIX` other than `tre` outside `microsoft/AzureTRE`. A repository that deploys only `main` keeps the main workspace cleanup without `CI_ENV_PREFIX`. Cleanup then selects no PR or branch environment.
+
+### Recover CI environments from before the tag
+
+A repository other than `microsoft/AzureTRE` that uses the `tre` prefix cannot manage its untagged CI environments. This applies also to a fork with its own subscription. Cleanup and `/test-destroy-env` refuse these groups, and bootstrap stops on them.
+To recover an environment that your repository created, tag its core and management groups with your repository name. Then run `/test-destroy-env`, or wait for the scheduled cleanup:
+
+```bash
+az group update --name rg-tre1a2b3c4d --set tags.ci_repository=contoso/AzureTRE
+az group update --name rg-tre1a2b3c4d-mgmt --set tags.ci_repository=contoso/AzureTRE
+```
+
+Tag only groups that your repository created. In a shared subscription, the same name can belong to an upstream environment.
+
 ## Dockerfile build checks
 
 The `Dockerfile Build Check` workflow builds Dockerfiles and Porter bundle images each Monday at 06:00 UTC. It can also run manually. Scheduled runs use the default branch, where the workflow must first be merged.
@@ -190,6 +232,7 @@ Configure variables used in the deployment workflow:
 | `FIREWALL_SKU` | Optional. The SKU of the Azure Firewall instance. Default value is `Standard`. Allowed values [`Basic`, `Standard`, `Premium`]. See [Azure Firewall SKU feature comparison](https://learn.microsoft.com/en-us/azure/firewall/choose-firewall-sku). |
 | `APP_GATEWAY_SKU` | Optional. The SKU of the Application Gateway. Default value is `Standard_v2`. Allowed values [`Standard_v2`, `WAF_v2`] |
 | `ENABLE_CMK_ENCRYPTION` | Optional. Default is `false`, if set to `true` customer-managed key encryption will be enabled for all supported resources. |
+| `CI_ENV_PREFIX` | Required outside `microsoft/AzureTRE`. The 3-character prefix of PR and branch CI environment names. Only `microsoft/AzureTRE` has the default value `tre`. Use another value in every fork, because some Azure resource names are globally unique. See [Forks that share a subscription](#forks-that-share-a-subscription). |
 
 ### Deploy the TRE using the workflow
 

@@ -79,10 +79,13 @@ elif command == "az":
             if "bad_group_response" in config:
                 print(config["bad_group_response"])
                 sys.exit(0)
+            prefix = re.search(r"starts_with\(name, '([^']+)'\)", query).group(1)
+            rows = [row.split("\t") for row in config["groups"]]
             print(json.dumps([{
-                "name": row.split("\t")[0],
-                "ci_git_ref": row.split("\t")[1] if "\t" in row else None,
-            } for row in config["groups"]]))
+                "name": row[0],
+                "ci_git_ref": row[1] if len(row) > 1 else None,
+                "ci_repository": row[2] if len(row) > 2 else None,
+            } for row in rows if config.get("unfiltered_query") or row[0].startswith(prefix)]))
         elif config.get("real_destroy") and query.endswith(".[name]"):
             if config.get("destroy_list_error"):
                 sys.exit(1)
@@ -167,7 +170,7 @@ class CleanupTests(unittest.TestCase):
             "PATH": str(bin_dir),
             "HOME": str(self.root),
             "MOCK_ROOT": str(self.root),
-            "GITHUB_REPOSITORY": "example/tre",
+            "GITHUB_REPOSITORY": "microsoft/AzureTRE",
             "GITHUB_RUN_ID": "123",
             "CI_CLEANUP_REF": "refs/pull/5085/merge",
             "GITHUB_WORKFLOW": "Clean Validation Environments",
@@ -296,6 +299,65 @@ class CleanupTests(unittest.TestCase):
         result = self.run_cleanup()
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.environment_actions(), [])
+
+    def test_groups_tagged_by_another_repository_are_never_cleaned(self):
+        self.config.update(
+            groups=["rg-tretest\trefs/pull/5085/merge\tcontoso/AzureTRE"], open_prs=[], unfiltered_query=True
+        )
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [])
+
+    def test_groups_tagged_by_this_repository_are_cleaned(self):
+        self.config.update(groups=["rg-tretest\trefs/pull/5085/merge\tMicrosoft/AzureTRE"], open_prs=[])
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [["destroy_env_no_terraform.sh", "--core-tre-rg", "rg-tretest"]])
+
+    def test_fork_prefix_selects_only_fork_groups(self):
+        self.env.update(GITHUB_REPOSITORY="contoso/AzureTRE", CI_ENV_PREFIX="frk")
+        self.config.update(
+            groups=["rg-tretest\trefs/pull/5085/merge", "rg-frktest\trefs/pull/5085/merge"],
+            open_prs=[],
+            unfiltered_query=True,
+        )
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [["destroy_env_no_terraform.sh", "--core-tre-rg", "rg-frktest"]])
+        group_lists = [call for call in self.calls if call[:3] == ["az", "group", "list"] and "ci_git_ref" in str(call)]
+        self.assertTrue(group_lists and all("'rg-frk'" in str(call) for call in group_lists))
+
+    def test_fork_with_the_default_prefix_cleans_only_its_tagged_groups(self):
+        self.env.update(GITHUB_REPOSITORY="contoso/AzureTRE", CI_ENV_PREFIX="tre")
+        self.config.update(
+            groups=["rg-tretest\trefs/pull/5085/merge", "rg-treother\trefs/pull/5085/merge\tcontoso/AzureTRE"],
+            open_prs=[],
+            unfiltered_query=True,
+        )
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [["destroy_env_no_terraform.sh", "--core-tre-rg", "rg-treother"]])
+
+    def test_fork_without_a_prefix_stops_before_inventory(self):
+        self.env["GITHUB_REPOSITORY"] = "contoso/AzureTRE"
+        result = self.run_cleanup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Set the CI_ENV_PREFIX repository variable", result.stderr)
+        self.assertEqual(self.environment_actions(), [])
+        self.assertFalse(any(call[:3] == ["az", "group", "list"] for call in self.calls))
+
+    def test_upstream_without_a_prefix_uses_the_default(self):
+        self.config.update(open_prs=[])
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [["destroy_env_no_terraform.sh", "--core-tre-rg", "rg-tretest"]])
+
+    def test_invalid_prefix_stops_before_inventory(self):
+        self.env["CI_ENV_PREFIX"] = "frktre"
+        result = self.run_cleanup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.environment_actions(), [])
+        self.assertFalse(any(call[:3] == ["az", "group", "list"] for call in self.calls))
 
     def test_main_workspace_cleanup_is_separate_and_synchronous(self):
         self.config["selected_ref"] = True

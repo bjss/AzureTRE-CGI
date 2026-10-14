@@ -7,9 +7,13 @@ import re
 import subprocess
 import sys
 
-from ci_environment_id import validate_ref
+from ci_environment_id import environment_prefix, repository_owns, validate_ref
 from ci_cleanup_activity import branch_activity, mutation_allowed
 from recover_bootstrap_lease import RecoveryError, github, require, verify_concurrency
+
+
+# Inventory value for a group that another repository tagged. It never equals a Git reference.
+FOREIGN_OWNER = "foreign-repository"
 
 
 def validate_cleanup_ref(ref):
@@ -50,14 +54,16 @@ def inventory():
             "Inconsistent cleanup resource group identity.",
         )
         require(group.get("tags") is None or isinstance(group.get("tags"), dict), "Invalid cleanup ownership tags.")
-        result[name] = (group.get("tags") or {}).get("ci_git_ref")
+        owned = repository_owns(group.get("tags"), os.environ.get("GITHUB_REPOSITORY", ""))
+        result[name] = (group.get("tags") or {}).get("ci_git_ref") if owned else FOREIGN_OWNER
     return result
 
 
 def references(groups):
     refs = {"refs/heads/main"}
+    prefix = "rg-" + environment_prefix()
     for name, ref in groups.items():
-        if not name.startswith("rg-tre") or ref is None:
+        if not name.startswith(prefix) or ref in (None, FOREIGN_OWNER):
             continue
         require(isinstance(ref, str), "Invalid CI ownership reference.")
         if not ref.startswith(("refs/heads/", "refs/pull/")):
@@ -66,6 +72,19 @@ def references(groups):
         refs.add(ref)
     require(len(refs) <= 256, "Too many cleanup references for one matrix. No cleanup was scheduled.")
     return sorted(refs)
+
+
+def plan():
+    try:
+        environment_prefix()
+    except ValueError as error:
+        # The main workspace sweep uses MAIN_TRE_ID, not the prefix. Keep it for repositories
+        # that deploy only main. An invalid prefix that is set is a mistake, so it still fails.
+        if os.environ.get("CI_ENV_PREFIX"):
+            raise
+        print(f"WARNING: {error} Only the main workspace cleanup is scheduled.", file=sys.stderr)
+        return ["refs/heads/main"]
+    return references(inventory())
 
 
 def context():
@@ -130,7 +149,7 @@ def verify_lock(ctx):
 
 def verify_target(groups, ref, group):
     require(
-        ref != "refs/heads/main" and re.fullmatch(r"rg-tre[a-z0-9-]+(?:-mgmt)?", group),
+        ref != "refs/heads/main" and re.fullmatch(rf"rg-{environment_prefix()}[a-z0-9-]+(?:-mgmt)?", group),
         "Invalid isolated cleanup target.",
     )
     core = group.removesuffix("-mgmt")
@@ -150,7 +169,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.operation == "plan":
-            print(json.dumps(references(inventory()), separators=(",", ":")))
+            print(json.dumps(plan(), separators=(",", ":")))
         else:
             ctx = context()
             members = verify_lock(ctx)

@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # This script cleans/deletes Azure environments created in CI.
-# A resource group will be evaluated if its name starts with aspecific prefix
-# and tagged with the 'ci_git_ref' tag.
+# A resource group will be evaluated if its name starts with rg-<CI_ENV_PREFIX>
+# and tagged with the 'ci_git_ref' tag. Groups that another repository tagged
+# with 'ci_repository' are never evaluated.
 # If the RG was created as part of a PR, then it will be deleted if the PR
 # isn't open anymore. In all other cases (like regular branches), it will
 # be deleted if the branch doesn't exist.
@@ -75,6 +76,14 @@ if [[ "${CI_CLEANUP_REF}" == refs/heads/main ]]; then
   exit "${failed}"
 fi
 
+# Keep these rules identical to environment_prefix() in ci_environment_id.py.
+if [[ -z "${CI_ENV_PREFIX:-}" && "${GITHUB_REPOSITORY,,}" != "microsoft/azuretre" ]]; then
+  echo "Set the CI_ENV_PREFIX repository variable. Only the upstream repository has a default." >&2
+  exit 1
+fi
+ci_env_prefix="${CI_ENV_PREFIX:-tre}"
+[[ "${ci_env_prefix}" =~ ^[a-z][a-z0-9]{2}$ ]] || { echo "Invalid CI environment prefix" >&2; exit 1; }
+
 az config set extension.use_dynamic_install=yes_without_prompt
 
 echo "Refs:"
@@ -91,13 +100,21 @@ open_prs=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_pa
 # Take a snapshot before deletion. A paired management group is handled through its
 # core group, even if the core group disappears during this sweep. Untagged groups
 # are never independent cleanup targets, including legacy management orphans.
-resource_groups=$(az group list --query "[?starts_with(name, 'rg-tre')].{name:name, ci_git_ref:tags.ci_git_ref}" -o json)
-cleanup_groups=$(jq -rs '
+resource_groups=$(az group list \
+  --query "[?starts_with(name, 'rg-${ci_env_prefix}')].{name:name, ci_git_ref:tags.ci_git_ref, ci_repository:tags.ci_repository}" \
+  -o json)
+cleanup_groups=$(jq -rs --arg prefix "rg-${ci_env_prefix}" --arg repo "${GITHUB_REPOSITORY}" '
   if length != 1 then error("Expected one resource group list") else .[0] end |
   if type != "array" then error("Invalid resource group list")
-  elif any(.[]; (.name | type) != "string" or (.ci_git_ref != null and (.ci_git_ref | type) != "string")) then
+  elif any(.[]; (.name | type) != "string" or (.ci_git_ref != null and (.ci_git_ref | type) != "string")
+      or (.ci_repository != null and (.ci_repository | type) != "string")) then
     error("Invalid resource group details")
   else . as $groups | .[]
+    | select(.name | startswith($prefix))
+    # Keep this rule identical to repository_owns() in ci_environment_id.py.
+    | select(if .ci_repository == null
+        then $prefix != "rg-tre" or ($repo | ascii_downcase) == "microsoft/azuretre"
+        else (.ci_repository | ascii_downcase) == ($repo | ascii_downcase) end)
     | select((.ci_git_ref // "") | test("^refs/(pull/[0-9]+/merge|heads/.+)$"))
     | .name as $name
     | select(($name | endswith("-mgmt") | not) or

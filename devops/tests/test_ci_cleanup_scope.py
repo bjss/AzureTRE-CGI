@@ -27,6 +27,7 @@ class ScopeTests(unittest.TestCase):
             {
                 "GITHUB_ACTIONS": "true",
                 "GITHUB_REPOSITORY": "microsoft/AzureTRE",
+                "CI_ENV_PREFIX": "",
                 "GITHUB_RUN_ID": "123",
                 "GITHUB_RUN_ATTEMPT": "2",
                 "CI_CLEANUP_REF": "refs/pull/51/merge",
@@ -181,6 +182,62 @@ class ScopeTests(unittest.TestCase):
         }
         self.assertEqual(scope.references(groups), ["refs/heads/feature/test", "refs/heads/main", "refs/pull/51/merge"])
         self.assertEqual(scope.references({}), ["refs/heads/main"])
+
+    def test_plan_selects_only_the_configured_prefix(self):
+        groups = {"rg-treaaaa1111": "refs/pull/51/merge", "rg-frkbbbb2222": "refs/pull/52/merge"}
+        self.assertEqual(scope.references(groups), ["refs/heads/main", "refs/pull/51/merge"])
+        with patch.dict(os.environ, {"CI_ENV_PREFIX": "frk"}):
+            self.assertEqual(scope.references(groups), ["refs/heads/main", "refs/pull/52/merge"])
+        with patch.dict(os.environ, {"CI_ENV_PREFIX": "frktre"}), self.assertRaises(ValueError):
+            scope.references(groups)
+
+    def test_plan_keeps_the_main_sweep_without_a_prefix(self):
+        with (
+            patch.dict(os.environ, {"GITHUB_REPOSITORY": "contoso/AzureTRE", "CI_ENV_PREFIX": ""}),
+            patch.object(scope, "inventory") as inventory,
+        ):
+            self.assertEqual(scope.plan(), ["refs/heads/main"])
+        inventory.assert_not_called()
+
+    def test_plan_fails_for_an_invalid_prefix(self):
+        for repository in ("contoso/AzureTRE", "microsoft/AzureTRE"):
+            with (
+                self.subTest(repository=repository),
+                patch.dict(os.environ, {"GITHUB_REPOSITORY": repository, "CI_ENV_PREFIX": "FRK"}),
+                patch.object(scope, "inventory") as inventory,
+                self.assertRaises(ValueError),
+            ):
+                scope.plan()
+            inventory.assert_not_called()
+
+    def test_plan_skips_groups_owned_by_another_repository(self):
+        groups = {"rg-treaaaa1111": scope.FOREIGN_OWNER, "rg-trebbbb2222": "refs/pull/52/merge"}
+        self.assertEqual(scope.references(groups), ["refs/heads/main", "refs/pull/52/merge"])
+
+    def test_target_refuses_a_sibling_owned_by_another_repository(self):
+        ref = self.ctx["ref"]
+        with self.assertRaises(scope.RecoveryError):
+            scope.verify_target(
+                {"rg-treaaaa1111": ref, "rg-treaaaa1111-mgmt": scope.FOREIGN_OWNER}, ref, "rg-treaaaa1111"
+            )
+        with patch.dict(os.environ, {"CI_ENV_PREFIX": "frk"}):
+            scope.verify_target({"rg-frkaaaa1111": ref}, ref, "rg-frkaaaa1111")
+            with self.assertRaises(scope.RecoveryError):
+                scope.verify_target({"rg-treaaaa1111": ref}, ref, "rg-treaaaa1111")
+
+    def test_inventory_marks_groups_tagged_by_another_repository(self):
+        def group(name, owner):
+            tags = {"ci_git_ref": self.ctx["ref"], **({"ci_repository": owner} if owner else {})}
+            return {"name": name, "id": "/subscriptions/sub/resourceGroups/" + name, "tags": tags}
+
+        groups = [group("rg-trea", None), group("rg-treb", "microsoft/AzureTRE"), group("rg-trec", "contoso/AzureTRE")]
+        with patch.object(
+            scope.subprocess, "check_output", side_effect=[json.dumps({"id": "sub"}), json.dumps(groups)]
+        ):
+            self.assertEqual(
+                scope.inventory(),
+                {"rg-trea": self.ctx["ref"], "rg-treb": self.ctx["ref"], "rg-trec": scope.FOREIGN_OWNER},
+            )
 
     def test_plan_rejects_invalid_refs_and_matrix_overflow(self):
         for groups in (
