@@ -367,6 +367,13 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(self.environment_actions(), [])
         self.assertIn(["az", "group", "delete", "--yes", "--name", "rg-main-ws-old"], self.calls)
 
+    def test_fork_without_a_prefix_keeps_the_main_workspace_cleanup(self):
+        self.config["selected_ref"] = True
+        self.env.update(CI_CLEANUP_REF="refs/heads/main", GITHUB_REPOSITORY="contoso/AzureTRE")
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["az", "group", "delete", "--yes", "--name", "rg-main-ws-old"], self.calls)
+
     def test_main_workspace_cleanup_waits_for_every_parallel_deletion(self):
         self.config.update(
             selected_ref=True,

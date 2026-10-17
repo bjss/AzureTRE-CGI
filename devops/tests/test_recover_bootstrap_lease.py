@@ -227,6 +227,15 @@ class RecoveryTests(unittest.TestCase):
         self.group_owner = {"ci_repository": "microsoft/AzureTRE"}
         recovery.verify_owner(self.ctx)
 
+    def test_fork_with_the_default_prefix_refuses_an_untagged_group(self):
+        # An untagged group with the tre prefix can hold an upstream bootstrap lease.
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "contoso/AzureTRE", "CI_ENV_PREFIX": "tre"}):
+            self.ctx = recovery.context()
+        with self.assertRaisesRegex(recovery.RecoveryError, "Another repository owns"):
+            recovery.verify_owner(self.ctx)
+        self.group_owner = {"ci_repository": "contoso/AzureTRE"}
+        recovery.verify_owner(self.ctx)
+
     def test_fork_prefix_selects_the_fork_backend(self):
         fork = {
             "CI_ENV_PREFIX": "frk",

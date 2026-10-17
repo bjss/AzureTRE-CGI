@@ -137,7 +137,7 @@ import recover_bootstrap_lease as recovery
 def github(ctx, suffix):
     if suffix == "/actions/runs/123":
         return {"id": 123, "run_attempt": 1, "status": "in_progress", "path": ".github/workflows/clean_validation_envs.yml",
-                "repository": {"full_name": "microsoft/AzureTRE"}}
+                "repository": {"full_name": os.environ["GITHUB_REPOSITORY"]}}
     if "/jobs?" in suffix:
         return {"total_count": 1, "jobs": [{"id": 99, "name": "Validate cleanup with disposable groups", "status": "in_progress"}]}
     if "/concurrency_groups/" in suffix:
@@ -313,7 +313,7 @@ class ValidationTests(unittest.TestCase):
                 for private in ("test-subscription", "test-tenant", "test-user", str(self.root)):
                     self.assertNotIn(private, evidence)
 
-    def fake_services(self):
+    def fake_services(self, prefix="", repository="microsoft/AzureTRE"):
         path = self.root / "azure.json"
         account = {"id": "test-subscription", "tenantId": "test-tenant", "user": {"name": "test-user", "type": "user"}}
         path.write_text(json.dumps({"groups": {}, "account": account}))
@@ -330,8 +330,8 @@ class ValidationTests(unittest.TestCase):
             os.environ,
             FAKE_AZURE_STATE=str(path),
             PATH=str(self.root) + os.pathsep + os.environ["PATH"],
-            GITHUB_REPOSITORY="microsoft/AzureTRE",
-            CI_ENV_PREFIX="",
+            GITHUB_REPOSITORY=repository,
+            CI_ENV_PREFIX=prefix,
             GITHUB_RUN_ID="123",
             GITHUB_RUN_ATTEMPT="1",
             GITHUB_ACTIONS="true",
@@ -343,7 +343,18 @@ class ValidationTests(unittest.TestCase):
         return path
 
     def test_real_scripts_complete_guarded_lifecycle_without_creating_storage(self):
-        path = self.fake_services()
+        self.assert_guarded_lifecycle(self.fake_services())
+
+    def test_real_scripts_complete_guarded_lifecycle_with_a_fork_prefix(self):
+        # The fork's own groups must not count as foreign or out of scope.
+        self.runner.state.update(
+            core="rg-frkvalidate-test", groups=["rg-frkvalidate-test-mgmt", "rg-frkvalidate-testother-mgmt"]
+        )
+        self.runner.save()
+        self.target, self.neighbour = self.runner.state["groups"]
+        self.assert_guarded_lifecycle(self.fake_services("frk", "contoso/AzureTRE"))
+
+    def assert_guarded_lifecycle(self, path):
         self.runner.scenarios()
         self.assertEqual(len(self.runner.state["checks"]), 9)
         self.assertEqual(

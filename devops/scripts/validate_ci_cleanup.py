@@ -27,9 +27,6 @@ def discovery():
     )
 
 
-STORAGE_NAME = "validationnevercreated"
-
-
 class ValidationError(Exception):
     """A validation assertion or scope check failed."""
 

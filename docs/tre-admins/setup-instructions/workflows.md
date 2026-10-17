@@ -25,7 +25,7 @@ The prefix has 3 characters: a lowercase letter, then 2 lowercase letters or dig
 Set it as a repository variable, not an environment variable, so that every job reads the same value.
 The prefix replaces `tre` at the start of every CI environment name, for example `rg-frk1a2b3c4d`. The 3 characters and the 8-character hash fill the 11-character `TRE_ID` limit.
 
-Only `microsoft/AzureTRE` has a default prefix. If `CI_ENV_PREFIX` is not set in another repository, PR deployment, branch deployment, cleanup and `/test-destroy-env` stop with an error.
+Only `microsoft/AzureTRE` has a default prefix. If `CI_ENV_PREFIX` is not set in another repository, PR deployment, branch deployment, PR and branch environment cleanup and `/test-destroy-env` stop with an error. The main workspace cleanup continues.
 Use a prefix other than `tre` in every fork, also in a fork with its own subscription. Storage account, container registry and Key Vault names are unique across all of Azure, so a fork with `tre` can collide with upstream PR environments in the same location.
 Set `tre` in a fork only to keep the names of existing environments.
 
