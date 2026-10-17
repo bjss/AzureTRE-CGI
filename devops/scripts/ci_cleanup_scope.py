@@ -82,7 +82,10 @@ def plan():
         # that deploy only main. An invalid prefix that is set is a mistake, so it still fails.
         if os.environ.get("CI_ENV_PREFIX"):
             raise
-        print(f"WARNING: {error} Only the main workspace cleanup is scheduled.", file=sys.stderr)
+        # Annotate the run, so that a fork with PR or branch environments sees the skipped cleanup.
+        print(
+            f"::warning title=CI cleanup scope::{error} Only the main workspace cleanup is scheduled.", file=sys.stderr
+        )
         return ["refs/heads/main"]
     return references(inventory())
 

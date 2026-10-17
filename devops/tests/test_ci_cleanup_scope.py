@@ -195,9 +195,11 @@ class ScopeTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {"GITHUB_REPOSITORY": "contoso/AzureTRE", "CI_ENV_PREFIX": ""}),
             patch.object(scope, "inventory") as inventory,
+            redirect_stderr(io.StringIO()) as stderr,
         ):
             self.assertEqual(scope.plan(), ["refs/heads/main"])
         inventory.assert_not_called()
+        self.assertTrue(stderr.getvalue().startswith("::warning title=CI cleanup scope::Set the CI_ENV_PREFIX"))
 
     def test_plan_fails_for_an_invalid_prefix(self):
         for repository in ("contoso/AzureTRE", "microsoft/AzureTRE"):
