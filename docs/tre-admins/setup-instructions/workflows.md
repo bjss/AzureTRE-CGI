@@ -14,9 +14,10 @@ Terraform continues to recover soft-deleted vaults in the same location through 
 The first run after adopting these names must include deployment. Use `/test COMMIT_SHA` without `skip_deployment`.
 PR comment workflow changes take effect after merge. Before merge, use the branch validation workflow from a trusted upstream branch to test the changed workflow.
 
-`/test-destroy-env` finds all core and management groups tagged with the PR's Git reference, including previous naming schemes and locations in the selected subscription.
+`/test-destroy-env` finds all core and management groups that start with `rg-<CI_ENV_PREFIX>` and have the PR's Git reference in the `ci_git_ref` tag. It includes previous naming schemes and locations in the selected subscription.
+If another repository owns a selected group, the command stops. See [Forks that share a subscription](#forks-that-share-a-subscription).
 For an upstream PR, it also cleans the tagged branch environments. Cleanup refuses conflicting ownership tags and shares deployment concurrency.
-Scheduled cleanup continues to use the `ci_git_ref` tags. Retained vaults remain subject to their existing soft-delete and purge protection policies.
+Scheduled cleanup continues to use the `ci_git_ref` tags. It also uses the `CI_ENV_PREFIX` name prefix and the `ci_repository` tag. Retained vaults remain subject to their existing soft-delete and purge protection policies.
 
 ### Forks that share a subscription
 
@@ -50,7 +51,8 @@ Merge or rebase the default branch into a fork branch before you dispatch the br
 
 If you rename or transfer the repository, cleanup refuses the groups that have the old name in `ci_repository`. Delete these groups manually, or change their tag to the new name.
 
-The `validate` mode of the cleanup workflow needs a `CI_ENV_PREFIX` other than `tre` outside `microsoft/AzureTRE`. A repository that deploys only `main` keeps the main workspace cleanup without `CI_ENV_PREFIX`. Cleanup then selects no PR or branch environment.
+The `validate` mode of the cleanup workflow needs a `CI_ENV_PREFIX` other than `tre` outside `microsoft/AzureTRE`.
+A repository that deploys only `main` keeps the main workspace cleanup without `CI_ENV_PREFIX`. Cleanup then selects no PR or branch environment, and the run shows a `CI cleanup scope` warning annotation. If the repository has PR or branch environments, set `CI_ENV_PREFIX` as a repository variable.
 
 ### Recover CI environments from before the tag
 
