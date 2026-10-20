@@ -15,8 +15,8 @@ from recover_bootstrap_lease import RecoveryError, github, require, verify_concu
 
 # Inventory value for a group that another repository tagged. It never equals a Git reference.
 FOREIGN_OWNER = "foreign-repository"
-# A person sets this tag on a core or management group to stop scheduled destruction.
-# Scheduled cleanup still stops the environment. Explicit destruction ignores the tag.
+# A person sets this tag on a core or management group to keep the environment.
+# Scheduled cleanup then does not stop or destroy it. Explicit destruction ignores the tag.
 KEEP_TAG = "ci_keep_until"
 KEEP_FOREVER = "forever"
 
@@ -202,7 +202,7 @@ def keep_reason(tags, today):
 
 
 def kept(group, today=None):
-    """Return why the core or management group of a destroy target has a keep tag, or None."""
+    """Return why the core or management group of a cleanup target has a keep tag, or None."""
     today = datetime.now(timezone.utc).date() if today is None else today
     tags = group_tags()
     core = group.removesuffix("-mgmt")
@@ -217,7 +217,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("plan", "verify-lock", "verify-target", "may-clean", "activity-time"))
     parser.add_argument("--group")
-    parser.add_argument("--action", choices=("stop", "destroy"))
     parser.add_argument("--commit-time", type=int)
     parser.add_argument("--inactive-hours", type=int)
     args = parser.parse_args()
@@ -230,16 +229,15 @@ def main():
             if args.operation in ("verify-target", "may-clean"):
                 verify_target(inventory(), ctx["ref"], args.group or "")
                 if args.operation == "may-clean":
-                    require(args.action is not None, "Name the cleanup action.")
                     allowed = mutation_allowed(ctx, members, args.commit_time, args.inactive_hours)
                     # Recheck ownership and queued work after reading history.
                     if allowed:
                         allowed = mutation_allowed(ctx, verify_lock(ctx))
                     # Read the keep tag last, so that a tag added during the checks still applies.
-                    reason = kept(args.group.lower()) if allowed and args.action == "destroy" else None
+                    reason = kept(args.group.lower()) if allowed else None
                     if reason:
                         print(
-                            f"::warning title=CI cleanup keep::Keeping {annotation(reason)}. Cleanup stops it instead.",
+                            f"::warning title=CI cleanup keep::Keeping {annotation(reason)}. Cleanup does not stop or destroy it.",
                             file=sys.stderr,
                         )
                     print("keep" if reason else "proceed" if allowed else "defer")

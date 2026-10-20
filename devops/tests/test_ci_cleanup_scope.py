@@ -137,9 +137,7 @@ class ScopeTests(unittest.TestCase):
         run = {"id": 456, "path": activity.BRANCH_WORKFLOW, "repository": {"full_name": self.ctx["repository"]}}
         output = io.StringIO()
         with (
-            patch.object(
-                sys, "argv", ["ci_cleanup_scope.py", "may-clean", "--action", "destroy", "--group", "rg-tretest"]
-            ),
+            patch.object(sys, "argv", ["ci_cleanup_scope.py", "may-clean", "--group", "rg-tretest"]),
             patch.object(scope, "verify_lock", side_effect=[owner, owner + [successor]]) as lock,
             patch.object(scope, "inventory", return_value={"rg-tretest": self.ctx["ref"]}),
             patch.object(activity, "github", return_value=run),
@@ -153,9 +151,7 @@ class ScopeTests(unittest.TestCase):
         owner = [{"run_id": 123, "job_id": 10, "status": "in_progress"}]
         output, error = io.StringIO(), io.StringIO()
         with (
-            patch.object(
-                sys, "argv", ["ci_cleanup_scope.py", "may-clean", "--action", "destroy", "--group", "rg-tretest"]
-            ),
+            patch.object(sys, "argv", ["ci_cleanup_scope.py", "may-clean", "--group", "rg-tretest"]),
             patch.object(scope, "verify_lock", side_effect=[owner, scope.RecoveryError("owner changed")]),
             patch.object(scope, "inventory", return_value={"rg-tretest": self.ctx["ref"]}),
             redirect_stdout(output),
@@ -349,13 +345,10 @@ class KeepTagTests(unittest.TestCase):
         with patch.object(scope, "group_tags", return_value=tags):
             self.assertIsNone(scope.kept("rg-tretest", self.TODAY))
 
-    def may_clean(self, action, tags, allowed=True):
+    def may_clean(self, tags, allowed=True):
         output, error = io.StringIO(), io.StringIO()
-        argv = ["ci_cleanup_scope.py", "may-clean", "--group", "rg-tretest"]
-        if action:
-            argv[2:2] = ["--action", action]
         with (
-            patch.object(sys, "argv", argv),
+            patch.object(sys, "argv", ["ci_cleanup_scope.py", "may-clean", "--group", "rg-tretest"]),
             patch.object(scope, "verify_lock", return_value=self.owner),
             patch.object(scope, "inventory", return_value={"rg-tretest": "refs/pull/51/merge"}),
             patch.object(scope, "mutation_allowed", return_value=allowed),
@@ -366,35 +359,30 @@ class KeepTagTests(unittest.TestCase):
             code = scope.main()
         return code, output.getvalue(), error.getvalue(), read.call_count
 
-    def test_destroy_of_a_kept_group_answers_keep_with_an_annotation(self):
-        code, output, error, _ = self.may_clean("destroy", {"rg-tretest-mgmt": {"ci_keep_until": "forever"}})
+    def test_kept_group_answers_keep_with_an_annotation(self):
+        code, output, error, _ = self.may_clean({"rg-tretest-mgmt": {"ci_keep_until": "forever"}})
         self.assertEqual((code, output), (0, "keep\n"))
         self.assertIn("::warning title=CI cleanup keep::Keeping rg-tretest-mgmt: ci_keep_until is forever", error)
+        self.assertIn("does not stop or destroy it", error)
 
-    def test_stop_ignores_the_keep_tag(self):
-        code, output, _, reads = self.may_clean("stop", {"rg-tretest": {"ci_keep_until": "forever"}})
-        self.assertEqual((code, output, reads), (0, "proceed\n", 0))
-
-    def test_deferred_destroy_stays_deferred(self):
-        code, output, _, reads = self.may_clean("destroy", {"rg-tretest": {"ci_keep_until": "forever"}}, False)
+    def test_deferred_cleanup_stays_deferred_without_reading_tags(self):
+        code, output, _, reads = self.may_clean({"rg-tretest": {"ci_keep_until": "forever"}}, False)
         self.assertEqual((code, output, reads), (0, "defer\n", 0))
 
-    def test_destroy_without_a_keep_tag_proceeds(self):
-        code, output, _, _ = self.may_clean("destroy", {"rg-tretest": {"ci_keep_until": "2000-01-01"}})
-        self.assertEqual((code, output), (0, "proceed\n"))
-
-    def test_may_clean_without_an_action_is_refused(self):
-        code, output, error, _ = self.may_clean(None, {})
-        self.assertEqual((code, output), (1, ""))
-        self.assertIn("Name the cleanup action", error)
+    def test_cleanup_without_a_current_keep_tag_proceeds(self):
+        code, output, error, _ = self.may_clean({"rg-tretest": {"ci_keep_until": "2000-01-01"}})
+        self.assertEqual((code, output, error), (0, "proceed\n", ""))
 
     def test_tag_text_cannot_start_another_workflow_command(self):
-        value = "x\n::error::injected%"
-        code, output, error, _ = self.may_clean("destroy", {"rg-tretest": {"ci_keep_until": value}})
+        value = "x\r\n::error::injected%"
+        code, output, error, _ = self.may_clean({"rg-tretest": {"ci_keep_until": value}})
         self.assertEqual((code, output), (0, "keep\n"))
         self.assertEqual(len(error.strip().splitlines()), 1)
         self.assertNotIn("\n::error", error)
         self.assertIn("%25", error)
+
+    def test_annotation_escapes_line_breaks_and_percent(self):
+        self.assertEqual(scope.annotation("a%b\r\nc"), "a%25b%0D%0Ac")
 
 
 class WorkflowContractTests(unittest.TestCase):

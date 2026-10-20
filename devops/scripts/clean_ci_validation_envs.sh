@@ -7,8 +7,8 @@
 # If the RG was created as part of a PR, then it will be deleted if the PR
 # isn't open anymore. In all other cases (like regular branches), it will
 # be deleted if the branch doesn't exist.
-# A ci_keep_until tag on the core or management group blocks destruction.
-# The environment is stopped instead. See ci_cleanup_scope.py.
+# A ci_keep_until tag on the core or management group blocks both stop and
+# destruction. See ci_cleanup_scope.py.
 
 set -o errexit
 set -o pipefail
@@ -18,9 +18,13 @@ set -o nounset
 function stopEnv ()
 {
   local decision
-  decision=$(python3 devops/scripts/ci_cleanup_scope.py may-clean --action stop --group "$1" "${@:2}")
+  decision=$(python3 devops/scripts/ci_cleanup_scope.py may-clean --group "$1" "${@:2}")
   if [[ "$decision" == defer ]]; then
     echo "Validation activity defers stopping $1."
+    return 0
+  fi
+  if [[ "$decision" == keep ]]; then
+    echo "A ci_keep_until tag keeps $1. Cleanup does not stop it."
     return 0
   fi
   [[ "$decision" == proceed ]] || { echo "Invalid cleanup activity decision" >&2; exit 1; }
@@ -36,15 +40,13 @@ function stopEnv ()
 function destroyEnv ()
 {
   local decision
-  decision=$(python3 devops/scripts/ci_cleanup_scope.py may-clean --action destroy --group "$1" "${@:2}")
+  decision=$(python3 devops/scripts/ci_cleanup_scope.py may-clean --group "$1" "${@:2}")
   if [[ "$decision" == defer ]]; then
     echo "Validation activity defers destroying $1."
     return 0
   fi
   if [[ "$decision" == keep ]]; then
-    # The keep tag blocks destruction only. Stop an environment that someone started again.
-    echo "A ci_keep_until tag keeps $1. Stopping it instead of destroying it."
-    stopEnv "$@"
+    echo "A ci_keep_until tag keeps $1. Cleanup does not destroy it."
     return 0
   fi
   [[ "$decision" == proceed ]] || { echo "Invalid cleanup activity decision" >&2; exit 1; }

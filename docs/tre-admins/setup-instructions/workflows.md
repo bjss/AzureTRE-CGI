@@ -22,31 +22,63 @@ Scheduled cleanup continues to use the `ci_git_ref` tags. It also uses the `CI_E
 ### Keep a CI environment
 
 Scheduled cleanup stops a PR or branch environment after 4 hours without activity. It destroys the environment after 48 hours, or when the PR closes or the branch is deleted.
-To keep an environment for longer, add the `ci_keep_until` tag to its core group (`rg-<TRE_ID>`) or its management group (`rg-<TRE_ID>-mgmt`):
+To keep an environment, for example for a demo, add the `ci_keep_until` tag to its core group (`rg-<TRE_ID>`) or its management group (`rg-<TRE_ID>-mgmt`):
 
 | Value | Result |
 | --- | --- |
-| A date, for example `2026-11-15` | Cleanup does not destroy the environment until the end of that day (UTC). It destroys the environment on the first scheduled run after that day. |
-| `forever` | Cleanup does not destroy the environment until you remove the tag. |
-| Any other value | Cleanup does not destroy the environment, and the run shows a warning about the invalid value. |
+| A date, for example `2026-11-15` | Cleanup does not stop or destroy the environment until the end of that day (UTC). After that day, the normal rules apply again. |
+| `forever` | Cleanup does not stop or destroy the environment until you remove the tag. |
+| Any other value | Cleanup does not stop or destroy the environment, and the run shows a warning about the invalid value. |
 
-```bash
-az group update --name rg-cgi1a2b3c4d-mgmt --set tags.ci_keep_until=2026-11-15
-```
+The tag claims the environment. You are then responsible for its cost:
 
-The tag blocks only the destruction. Scheduled cleanup still stops an inactive environment, which saves money. To use the environment again, log in to the CI subscription with the Azure CLI and start it:
+* Use a date, not `forever`, when you can. If you forget the tag, the date ends it.
+* Stop the environment when you do not use it. Start it again when you need it.
+* Remove the tag when you no longer need the environment. The next scheduled run then applies the normal rules, and destroys an environment whose PR is closed or whose branch is deleted.
 
-```bash
-TRE_ID=cgi1a2b3c4d devops/scripts/control_tre.sh start
-```
-
-Do not use `make tre-start` for a CI environment. It loads `config.yaml`, which replaces the `TRE_ID` that you give.
-Scheduled cleanup runs every hour. A manual start is not CI activity, so the next run stops the environment again. To keep it running for longer, run `/test` again for a PR environment, or run the branch deployment workflow again for a branch environment. You can use `/test` only while the PR is open.
 Each scheduled run that keeps an environment shows a `CI cleanup keep` warning annotation with the group and the tag value.
-To let cleanup destroy the environment, remove the tag. Cleanup then destroys it on the next scheduled run, if the environment still meets the conditions above.
-
 `/test-destroy-env` ignores the tag, because it is an explicit request to destroy the environment. The tag does not apply to the main workspace cleanup.
 Bootstrap and Terraform keep the tag when CI deploys the environment again.
+
+#### Operate a kept environment from your computer
+
+You need the Azure CLI, `bash`, `jq` and a clone of this repository. You also need Contributor access to `rg-<TRE_ID>` and its `rg-<TRE_ID>-ws-*` groups. The examples put the tag on the core group `rg-<TRE_ID>`, so that this access is sufficient.
+
+1. Log in to the subscription that CI uses:
+
+    ```bash
+    az login --tenant <TENANT_ID>
+    az account set --subscription <SUBSCRIPTION_ID>
+    ```
+
+1. Find the `TRE_ID` of the environment. The deployment log shows it:
+
+    * A branch deployment prints `using id of: ... (TRE ID <TRE_ID>)`.
+    * A `/test` run prints `CI environment <TRE_ID> in <LOCATION>` in its `Derive CI environment ID` step.
+
+    You can also read it from the `tre_id` tag of the core group. For a PR environment, the Git reference is `refs/pull/<PR_NUMBER>/merge`:
+
+    ```bash
+    az group list -o tsv --query "[?tags.ci_git_ref=='refs/heads/<BRANCH>' && tags.ci_repository=='<OWNER>/<REPOSITORY>' && tags.tre_id].tags.tre_id"
+    ```
+
+1. Claim the environment, then stop and start it as you need:
+
+    ```bash
+    export TRE_ID=<TRE_ID>
+    az group update --name "rg-${TRE_ID}" --set tags.ci_keep_until=2026-11-15
+    devops/scripts/control_tre.sh stop
+    devops/scripts/control_tre.sh start
+    ```
+
+1. Remove the tag when you no longer need the environment:
+
+    ```bash
+    az group update --name "rg-${TRE_ID}" --remove tags.ci_keep_until
+    ```
+
+`control_tre.sh stop` stops the firewall, the Application Gateway, MySQL, the resource processor and the core VMs. It also deallocates all workspace VMs. `control_tre.sh start` starts the same core services, but not the workspace VMs. Start the workspace VMs from the TRE UI, or with `az vm start`.
+Do not use `make tre-start` or `make tre-stop` for a CI environment. These targets load `config.yaml`, which replaces the `TRE_ID` that you give.
 
 ### Forks that share a subscription
 
