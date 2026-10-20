@@ -32,7 +32,8 @@ if command == "python3":
     if "may-clean" in args:
         if config.get("activity_error"):
             sys.exit("CI cleanup refused: history incomplete")
-        print(config.get("activity_decision", "proceed"))
+        action = args[args.index("--action") + 1] if "--action" in args else None
+        print(config.get("action_decisions", {}).get(action, config.get("activity_decision", "proceed")))
     elif "activity-time" in args:
         print(2000000000 - config.get("activity_age_hours", config["age_hours"]) * 3600)
     sys.exit(0)
@@ -431,6 +432,62 @@ class CleanupTests(unittest.TestCase):
 
     def environment_actions(self):
         return [call for call in self.calls if call[0] in ("control_tre.sh", "destroy_env_no_terraform.sh")]
+
+    def guard_actions(self):
+        return [
+            call[call.index("--action") + 1] if "--action" in call else None
+            for call in self.calls
+            if "may-clean" in call
+        ]
+
+    def test_every_guard_names_its_action(self):
+        self.config.update(groups=["rg-tretest\trefs/heads/feature/test"], age_hours=100)
+        for hours, actions in ((6, ["stop"]), (60, ["destroy"])):
+            with self.subTest(hours=hours):
+                self.config["activity_age_hours"] = hours
+                result = self.run_cleanup()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.guard_actions(), actions)
+
+    def test_keep_tag_stops_instead_of_destroying(self):
+        # Closed PR, deleted branch and an inactive branch all reach the destroy guard.
+        for ref, missing, prs in (
+            ("refs/pull/5085/merge", False, []),
+            ("refs/heads/feature/deleted", True, []),
+            ("refs/heads/feature/test", False, []),
+        ):
+            with self.subTest(ref=ref, missing=missing):
+                self.config.update(
+                    groups=["rg-tretest\t" + ref],
+                    missing_branch=missing,
+                    open_prs=prs,
+                    age_hours=100,
+                    activity_age_hours=60,
+                    action_decisions={"destroy": "keep"},
+                )
+                result = self.run_cleanup()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.environment_actions(), [["control_tre.sh", "stop"]])
+                self.assertEqual(self.guard_actions(), ["destroy", "stop"])
+                self.assertIn("Stopping it instead of destroying it", result.stdout)
+
+    def test_kept_environment_follows_the_stop_guard(self):
+        self.config.update(groups=["rg-tretest\trefs/pull/5085/merge"], open_prs=[])
+        for decision, code in (("defer", 0), ("unknown", 1)):
+            with self.subTest(decision=decision):
+                self.config["action_decisions"] = {"destroy": "keep", "stop": decision}
+                result = self.run_cleanup()
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual(self.environment_actions(), [])
+
+    def test_kept_management_only_environment_is_not_destroyed(self):
+        self.config.update(
+            groups=["rg-tretest-mgmt\trefs/pull/5085/merge"], open_prs=[], action_decisions={"destroy": "keep"}
+        )
+        result = self.run_cleanup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.environment_actions(), [])
+        self.assertEqual(self.guard_actions(), ["destroy", "stop"])
 
     def test_management_only_closed_pr_uses_core_name_for_destroy(self):
         self.config.update(groups=["rg-tretest-mgmt\trefs/pull/5085/merge"], open_prs=[])

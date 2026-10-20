@@ -19,6 +19,35 @@ If another repository owns a selected group, the command stops. See [Forks that 
 For an upstream PR, it also cleans the tagged branch environments. Cleanup refuses conflicting ownership tags and shares deployment concurrency.
 Scheduled cleanup continues to use the `ci_git_ref` tags. It also uses the `CI_ENV_PREFIX` name prefix and the `ci_repository` tag. Retained vaults remain subject to their existing soft-delete and purge protection policies.
 
+### Keep a CI environment
+
+Scheduled cleanup stops a PR or branch environment after 4 hours without activity. It destroys the environment after 48 hours, or when the PR closes or the branch is deleted.
+To keep an environment for longer, add the `ci_keep_until` tag to its core group (`rg-<TRE_ID>`) or its management group (`rg-<TRE_ID>-mgmt`):
+
+| Value | Result |
+| --- | --- |
+| A date, for example `2026-11-15` | Cleanup does not destroy the environment until the end of that day (UTC). It destroys the environment on the first scheduled run after that day. |
+| `forever` | Cleanup does not destroy the environment until you remove the tag. |
+| Any other value | Cleanup does not destroy the environment, and the run shows a warning about the invalid value. |
+
+```bash
+az group update --name rg-cgi1a2b3c4d-mgmt --set tags.ci_keep_until=2026-11-15
+```
+
+The tag blocks only the destruction. Scheduled cleanup still stops an inactive environment, which saves money. To use the environment again, log in to the CI subscription with the Azure CLI and start it:
+
+```bash
+TRE_ID=cgi1a2b3c4d devops/scripts/control_tre.sh start
+```
+
+Do not use `make tre-start` for a CI environment. It loads `config.yaml`, which replaces the `TRE_ID` that you give.
+Scheduled cleanup runs every hour. A manual start is not CI activity, so the next run stops the environment again. To keep it running for longer, run `/test` again for a PR environment, or run the branch deployment workflow again for a branch environment. You can use `/test` only while the PR is open.
+Each scheduled run that keeps an environment shows a `CI cleanup keep` warning annotation with the group and the tag value.
+To let cleanup destroy the environment, remove the tag. Cleanup then destroys it on the next scheduled run, if the environment still meets the conditions above.
+
+`/test-destroy-env` ignores the tag, because it is an explicit request to destroy the environment. The tag does not apply to the main workspace cleanup.
+Bootstrap and Terraform keep the tag when CI deploys the environment again.
+
 ### Forks that share a subscription
 
 A fork can run CI in the same Azure subscription as another repository. Set the `CI_ENV_PREFIX` repository variable in the fork to a prefix that no other Azure TRE repository uses.

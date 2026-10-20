@@ -1,6 +1,7 @@
 """Plan CI cleanup references and verify their GitHub concurrency ownership."""
 
 import argparse
+from datetime import date, datetime, timezone
 import json
 import os
 import re
@@ -14,6 +15,10 @@ from recover_bootstrap_lease import RecoveryError, github, require, verify_concu
 
 # Inventory value for a group that another repository tagged. It never equals a Git reference.
 FOREIGN_OWNER = "foreign-repository"
+# A person sets this tag on a core or management group to stop scheduled destruction.
+# Scheduled cleanup still stops the environment. Explicit destruction ignores the tag.
+KEEP_TAG = "ci_keep_until"
+KEEP_FOREVER = "forever"
 
 
 def validate_cleanup_ref(ref):
@@ -35,7 +40,8 @@ def verify_account():
     return subscription
 
 
-def inventory():
+def group_tags():
+    """Read the tags of every resource group in the cleanup subscription."""
     subscription = verify_account()
     groups = json.loads(
         subprocess.check_output(
@@ -54,9 +60,16 @@ def inventory():
             "Inconsistent cleanup resource group identity.",
         )
         require(group.get("tags") is None or isinstance(group.get("tags"), dict), "Invalid cleanup ownership tags.")
-        owned = repository_owns(group.get("tags"), os.environ.get("GITHUB_REPOSITORY", ""))
-        result[name] = (group.get("tags") or {}).get("ci_git_ref") if owned else FOREIGN_OWNER
+        result[name] = group.get("tags") or {}
     return result
+
+
+def inventory():
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    return {
+        name: tags.get("ci_git_ref") if repository_owns(tags, repository) else FOREIGN_OWNER
+        for name, tags in group_tags().items()
+    }
 
 
 def references(groups):
@@ -163,10 +176,48 @@ def verify_target(groups, ref, group):
     )
 
 
+def annotation(text):
+    # Escape tag text, so that a value cannot end the annotation or start another workflow command.
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def keep_reason(tags, today):
+    """Return why a group's tags keep it, or None. A value that is not valid keeps the group."""
+    values = [value for name, value in tags.items() if name.lower() == KEEP_TAG]
+    if not values:
+        return None
+    value = values[0]
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() == KEEP_FOREVER:
+            return f"{KEEP_TAG} is {KEEP_FOREVER}"
+        try:
+            until = date.fromisoformat(text) if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text) else None
+        except ValueError:
+            until = None
+        if until is not None:
+            # The date is the last day that the cleanup keeps the group.
+            return f"{KEEP_TAG} is {text}" if today <= until else None
+    return f"{KEEP_TAG} has the invalid value {json.dumps(value)}. Use YYYY-MM-DD or {KEEP_FOREVER}"
+
+
+def kept(group, today=None):
+    """Return why the core or management group of a destroy target has a keep tag, or None."""
+    today = datetime.now(timezone.utc).date() if today is None else today
+    tags = group_tags()
+    core = group.removesuffix("-mgmt")
+    for name in (core, core + "-mgmt"):
+        reason = keep_reason(tags.get(name, {}), today)
+        if reason:
+            return f"{name}: {reason}"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("operation", choices=("plan", "verify-lock", "verify-target", "may-clean", "activity-time"))
     parser.add_argument("--group")
+    parser.add_argument("--action", choices=("stop", "destroy"))
     parser.add_argument("--commit-time", type=int)
     parser.add_argument("--inactive-hours", type=int)
     args = parser.parse_args()
@@ -179,11 +230,19 @@ def main():
             if args.operation in ("verify-target", "may-clean"):
                 verify_target(inventory(), ctx["ref"], args.group or "")
                 if args.operation == "may-clean":
+                    require(args.action is not None, "Name the cleanup action.")
                     allowed = mutation_allowed(ctx, members, args.commit_time, args.inactive_hours)
                     # Recheck ownership and queued work after reading history.
                     if allowed:
                         allowed = mutation_allowed(ctx, verify_lock(ctx))
-                    print("proceed" if allowed else "defer")
+                    # Read the keep tag last, so that a tag added during the checks still applies.
+                    reason = kept(args.group.lower()) if allowed and args.action == "destroy" else None
+                    if reason:
+                        print(
+                            f"::warning title=CI cleanup keep::Keeping {annotation(reason)}. Cleanup stops it instead.",
+                            file=sys.stderr,
+                        )
+                    print("keep" if reason else "proceed" if allowed else "defer")
             else:
                 verify_account()
                 if args.operation == "activity-time":
