@@ -108,6 +108,18 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self.resources.wait_terminal(owner(), operation_id=OPERATION)
         self.assertEqual(sleep.await_count, 2)
 
+    async def test_new_resource_without_a_status_keeps_polling(self):
+        self.client.get.side_effect = [
+            response({"workspaceService": record(None)}),
+            operations("awaiting_deployment"),
+            response({"workspaceService": record()}),
+            operations(),
+        ]
+        with patch.object(lc.asyncio, "sleep", AsyncMock()) as sleep:
+            deployed, _ = await self.resources.wait_terminal(owner())
+        self.assertEqual(deployed["deploymentStatus"], "deployed")
+        sleep.assert_awaited_once_with(30)
+
     async def test_ownership_change_prevents_deletion(self):
         self.resources.owned = [owner()]
         self.client.get.return_value = response({"workspaceService": record(description="different owner")})

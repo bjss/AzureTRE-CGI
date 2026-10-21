@@ -248,6 +248,17 @@ class DatabricksPollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(observed), 2)
         self.sleep.assert_awaited_once_with(30)
 
+    async def test_new_resource_without_a_status_keeps_polling(self):
+        self.client.get.side_effect = [
+            response(self.resource, None),
+            operations("awaiting_deployment"),
+            response(self.resource),
+            operations("deployed"),
+        ]
+        state, _ = await self.resources.wait_terminal(self.resource, allow_absent=False)
+        self.assertEqual(state["deploymentStatus"], "deployed")
+        self.sleep.assert_awaited_once_with(30)
+
     async def test_empty_operation_list_does_not_prove_terminal_creation(self):
         self.client.get.side_effect = [
             response(self.resource),
@@ -264,7 +275,7 @@ class DatabricksPollingTests(unittest.IsolatedAsyncioTestCase):
             {"templateName": "other"},
             {"properties": {"display_name": "other", "description": self.resource.description}},
             {"properties": {"display_name": self.resource.display_name, "description": "other"}},
-            {"deploymentStatus": None},
+            {"deploymentStatus": 7},
         ]
         for change in changes:
             with self.subTest(change=change), self.assertRaisesRegex(ValueError, "ownership or deployment status"):

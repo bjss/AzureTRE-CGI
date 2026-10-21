@@ -79,7 +79,8 @@ class OwnedResource:
             or resource.get("templateName") != self.template
             or properties.get("display_name") != self.display_name
             or properties.get("description") != self.description
-            or not isinstance(resource.get("deploymentStatus"), str)
+            # The API stores no status until the first deployment status message arrives.
+            or not isinstance(resource.get("deploymentStatus"), str | None)
         ):
             raise ValueError("OHDSI resource ownership or deployment status changed")
         return resource
