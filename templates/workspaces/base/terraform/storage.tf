@@ -171,12 +171,6 @@ resource "azurerm_backup_container_storage_account" "storage_account" {
   resource_group_name = azurerm_resource_group.ws.name
   recovery_vault_name = module.backup[0].vault_name
   storage_account_id  = azurerm_storage_account.stg.id
-
-  # Azure Backup fails with CloudInternalError when registration overlaps the storage firewall update.
-  depends_on = [
-    azurerm_storage_account_network_rules.stgrules,
-    azurerm_private_endpoint.stgfilepe
-  ]
 }
 
 resource "terraform_data" "wait_for_backup_cleanup" {
