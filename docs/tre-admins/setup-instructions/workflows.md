@@ -74,7 +74,7 @@ You need the Azure CLI, `bash`, `jq` and a clone of this repository. You also ne
 1. Remove the tag when you no longer need the environment:
 
     ```bash
-    az group update --name "rg-${TRE_ID}" --remove tags.ci_keep_until
+    az tag update --resource-id "$(az group show --name "rg-${TRE_ID}" --query id -o tsv)" --operation Delete --tags ci_keep_until
     ```
 
 `control_tre.sh stop` stops the firewall, the Application Gateway, MySQL, the resource processor and the core VMs. It also deallocates all workspace VMs. `control_tre.sh start` starts the same core services, but not the workspace VMs. Start the workspace VMs from the TRE UI, or with `az vm start`.
