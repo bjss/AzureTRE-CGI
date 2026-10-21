@@ -35,6 +35,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Create the OpenAI private endpoint after the model deployment, so that Azure does not reject it while the deployment updates the account. (`tre-workspace-service-openai` 1.1.0) ([#5249](https://github.com/microsoft/AzureTRE/issues/5249))
 * Fix OHDSI database credentials, bound WebAPI startup checks, disable public access and remove owned firewall rules on uninstall. (`tre-workspace-service-ohdsi` 0.3.14) ([#5149](https://github.com/microsoft/AzureTRE/issues/5149))
 * Export the CycleCloud VM ID for start and stop actions. (`tre-shared-service-cyclecloud` 0.7.10) ([#5159](https://github.com/microsoft/AzureTRE/issues/5159))
 * Record the existing Databricks firewall prerequisite as reused in bundle evidence. ([#5217](https://github.com/microsoft/AzureTRE/pull/5217))
