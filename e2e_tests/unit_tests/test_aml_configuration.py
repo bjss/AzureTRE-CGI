@@ -223,3 +223,21 @@ class WorkflowPrerequisiteTests(unittest.TestCase):
                     self.assertEqual(
                         job["secrets"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
                     )
+
+
+class ServiceTagTests(unittest.TestCase):
+    def test_firewall_tags_use_the_region_display_name(self):
+        # The service tags API returns short region codes, such as switzerlandn, that location filters do not match.
+        source = (ROOT / "templates/workspace_services/azureml/terraform/outputs.tf").read_text()
+        self.assertNotIn('data "azurerm_network_service_tags"', source)
+        self.assertRegex(
+            source, r'service_tag_region\s*=\s*replace\(data\.azurerm_location\.aml\.display_name, " ", ""\)'
+        )
+        for output, service in (
+            ("storage_tag", "Storage"),
+            ("mcr_tag", "MicrosoftContainerRegistry"),
+            ("batch_tag", "BatchNodeManagement"),
+        ):
+            with self.subTest(output=output):
+                block = source.split(f'output "{output}" {{', 1)[1].split("\n}", 1)[0]
+                self.assertIn(f'"{service}.${{local.service_tag_region}}"', block)
