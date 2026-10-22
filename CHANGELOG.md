@@ -35,6 +35,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Make one storage registration attempt before Terraform registers the workspace storage account with Azure Backup. Azure Backup fails the first registration in a new vault with an internal error, so every backup-enabled workspace failed to deploy. (`tre-workspace-base` 2.12.5, `tre-workspace-unrestricted` 0.15.4, `tre-workspace-airlock-import-review` 0.18.4) ([#5135](https://github.com/microsoft/AzureTRE/issues/5135))
 * Link App Insights to the Azure Monitor private link scope after the private endpoint exists. Before this fix, App Insights rejected all private ingestion with HTTP 403, so the core and workspace App Insights received no telemetry.
   Rename the scoped service, so that existing deployments replace the link on upgrade. (`core` 0.18.16, `tre-workspace-base` 2.12.4, `tre-workspace-unrestricted` 0.15.3, `tre-workspace-airlock-import-review` 0.18.3)
 * Create the OpenAI private endpoint after the model deployment, so that Azure does not reject it while the deployment updates the account. (`tre-workspace-service-openai` 1.1.0) ([#5249](https://github.com/microsoft/AzureTRE/issues/5249))
