@@ -117,6 +117,9 @@ on: # yamllint disable-line rule:truthy
       TEST_ACCOUNT_CLIENT_SECRET:
         description: ""
         required: true
+      TEST_AML_USER_OBJECT_ID:
+        description: ""
+        required: false
       TRE_ID:
         description: ""
         required: true
@@ -1140,7 +1143,7 @@ jobs:
           LOCATION: ${{ vars.LOCATION }}
           API_CLIENT_ID: "${{ secrets.API_CLIENT_ID }}"
           AAD_TENANT_ID: "${{ secrets.AAD_TENANT_ID }}"
-          TEST_AML_USER_OBJECT_ID: ${{ vars.TEST_AML_USER_OBJECT_ID }}
+          TEST_AML_USER_OBJECT_ID: "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
           TEST_APP_ID: "${{ secrets.TEST_APP_ID }}"
           TEST_WORKSPACE_APP_ID: "${{ secrets.TEST_WORKSPACE_APP_ID }}"
           TEST_WORKSPACE_APP_SECRET: "${{ secrets.TEST_WORKSPACE_APP_SECRET }}"

@@ -207,4 +207,19 @@ class WorkflowPrerequisiteTests(unittest.TestCase):
         self.assertIn("AML_VALIDATION_DEADLINE", steps[0]["run"])
         run = next(s for s in steps if s["name"] == "Run E2E Tests")
         self.assertIn("AML_VALIDATION_DEADLINE=${{ env.AML_VALIDATION_DEADLINE }}", run["with"]["COMMAND"])
-        self.assertEqual(run["with"]["TEST_AML_USER_OBJECT_ID"], "${{ vars.TEST_AML_USER_OBJECT_ID }}")
+        self.assertEqual(run["with"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}")
+        workflows = ROOT / ".github/workflows"
+        secrets = yaml.safe_load((workflows / "deploy_tre_reusable.yml").read_text())[True]["workflow_call"]["secrets"]
+        self.assertIs(secrets["TEST_AML_USER_OBJECT_ID"]["required"], False)
+        for caller in ("deploy_tre.yml", "deploy_tre_branch.yml", "pr_comment_bot.yml"):
+            with self.subTest(caller=caller):
+                calls = [
+                    job
+                    for job in yaml.safe_load((workflows / caller).read_text())["jobs"].values()
+                    if job.get("uses") == "./.github/workflows/deploy_tre_reusable.yml"
+                ]
+                self.assertTrue(calls)
+                for job in calls:
+                    self.assertEqual(
+                        job["secrets"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
+                    )

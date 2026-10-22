@@ -155,7 +155,7 @@ The test identity needs the existing Automatic-workspace permissions. Automatic 
 ARM inspection currently supports AzureCloud and requires matching authentication and Azure tenants.
 
 For compute, set the environment variable `TEST_AML_USER_OBJECT_ID` to an existing Entra user's object ID.
-In GitHub Actions, set the same name as a variable on the selected GitHub environment.
+In GitHub Actions, set the same name as a secret on the selected GitHub environment.
 Do not use an application or service-principal object ID.
 Preflight checks UUID syntax. It does not query the directory or establish the user's type, existence or access.
 The test does not read Graph, grant roles or add group membership.
