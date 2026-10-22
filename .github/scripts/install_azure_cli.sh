@@ -11,5 +11,5 @@ AZ_VER="2.91.0"
 AZ_DIST=$(lsb_release -cs)
 
 apt-cache policy azure-cli
-sudo apt-get install azure-cli="${AZ_VER}-1~${AZ_DIST}" --allow-downgrades
+sudo apt-get install -y azure-cli="${AZ_VER}-1~${AZ_DIST}" --allow-downgrades
 az version
