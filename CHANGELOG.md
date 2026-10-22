@@ -40,6 +40,7 @@ BUG FIXES:
   Rename the scoped service, so that existing deployments replace the link on upgrade. (`core` 0.18.16, `tre-workspace-base` 2.12.4, `tre-workspace-unrestricted` 0.15.3, `tre-workspace-airlock-import-review` 0.18.3)
 * Create the OpenAI private endpoint after the model deployment, so that Azure does not reject it while the deployment updates the account. (`tre-workspace-service-openai` 1.1.0) ([#5249](https://github.com/microsoft/AzureTRE/issues/5249))
 * Fix OHDSI database credentials, bound WebAPI startup checks, disable public access and remove owned firewall rules on uninstall. (`tre-workspace-service-ohdsi` 0.3.14) ([#5149](https://github.com/microsoft/AzureTRE/issues/5149))
+* Upload the OHDSI Atlas UI config with the storage account key, as the share and its web app mount already do. Since azurerm 4, the upload used Azure AD and failed with HTTP 403, because the resource processor has no file data role. (`tre-workspace-service-ohdsi` 0.3.15)
 * Export the CycleCloud VM ID for start and stop actions. (`tre-shared-service-cyclecloud` 0.7.10) ([#5159](https://github.com/microsoft/AzureTRE/issues/5159))
 * Record the existing Databricks firewall prerequisite as reused in bundle evidence. ([#5217](https://github.com/microsoft/AzureTRE/pull/5217))
 * Fill the missing Switzerland North Databricks storage and Event Hubs endpoints for DNS lookup and firewall rules. (`tre-service-databricks` 1.0.20) ([#5140](https://github.com/microsoft/AzureTRE/issues/5140))
