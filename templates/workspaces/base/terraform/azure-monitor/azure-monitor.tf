@@ -114,14 +114,15 @@ resource "azurerm_monitor_private_link_scoped_service" "ampls_log_anaytics" {
   ]
 }
 
-# A link or unlink in the scope makes Azure update the private endpoint. An update after an unlink takes up to 90 seconds.
+# A link or unlink in the scope makes Azure update the private endpoint. An update after an unlink takes up to 90 seconds,
+# and Azure runs the updates one after the other, so the two unlinks keep the endpoint busy for up to 3 minutes.
 # During the update, Azure rejects changes to the endpoint DNS zone group with 409 AnotherOperationInProgress.
 # The scoped services depend on this resource, so they change only after the endpoint exists,
 # and on destroy Terraform waits here before it deletes the endpoint.
 resource "terraform_data" "ampls_endpoint_update_wait" {
   provisioner "local-exec" {
     when    = destroy
-    command = "sleep 180"
+    command = "sleep 300"
   }
 
   depends_on = [
