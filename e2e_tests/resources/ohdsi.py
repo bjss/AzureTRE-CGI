@@ -150,7 +150,8 @@ def validate_app(app, configuration, identifier, ids, tags, key):
     site = configuration["properties"]
     assert site.get("ftpsState") == "Disabled", "OHDSI web app permits FTP"
     assert site.get("minTlsVersion") == "1.3", "OHDSI web app TLS setting differs"
-    assert site.get("linuxFxVersion") == f"DOCKER|index.docker.io/ohdsi/{key}:2.12.1", "OHDSI image differs"
+    # The bundle sets no docker_registry_url, so azurerm writes an empty registry host before the image.
+    assert site.get("linuxFxVersion") == f"DOCKER|/index.docker.io/ohdsi/{key}:2.12.1", "OHDSI image differs"
     if key == "webapi":
         identity = app.get("identity", {})
         assert identity.get("type") == "UserAssigned", "Unexpected OHDSI application identity type"

@@ -92,7 +92,7 @@ def arm_records():
             "properties": {
                 "ftpsState": "Disabled",
                 "minTlsVersion": "1.3",
-                "linuxFxVersion": f"DOCKER|index.docker.io/ohdsi/{key}:2.12.1",
+                "linuxFxVersion": f"DOCKER|/index.docker.io/ohdsi/{key}:2.12.1",
             }
         }
         endpoint = IDS["endpoints"][key]
