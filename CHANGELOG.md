@@ -73,6 +73,7 @@ BUG FIXES:
 * Fix OHDSI bundle builds by moving to Debian Bookworm and installing a checksum-verified Go `sqlcmd` release. (`tre-workspace-service-ohdsi` 0.3.10) ([#5083](https://github.com/microsoft/AzureTRE/issues/5083))
 * Fix Guacamole login failures in large workspaces: raise the user-resources API timeout from 5s to 30s, batch template version lookups into one Cosmos query, and query VM power states concurrently. (`tre-service-guacamole` 0.14.6, `API` 0.27.31) ([#5099](https://github.com/microsoft/AzureTRE/issues/5099))
 * Fix API resource update retries so a successful retry returns the patched resource to the original caller. (`API` 0.27.32) ([#5025](https://github.com/microsoft/AzureTRE/pull/5025))
+* Fix Clean Validation workflow failures from transient Azure CLI checksum errors by installing a pinned Azure CLI version through a shared script used by the Clean Validation Environments and Lets Encrypt workflows. (`build-scripts` 1.1.6) ([#4971](https://github.com/microsoft/AzureTRE/issues/4971))
 
 ## (0.29.1)
 **BREAKING CHANGES**
@@ -188,7 +189,6 @@ BUG FIXES:
 * Fix Guacamole Windows VM image selections by aligning schema enums/defaults with supported image options in Windows and review VM templates. ([#4963](https://github.com/microsoft/AzureTRE/issues/4963))
 * Remove deprecated `soft_delete_enabled` setting from `azurerm_recovery_services_vault` in base workspace template. ([#4967](https://github.com/microsoft/AzureTRE/issues/4967))
 * Pin MKDocs to v1 to prevent incompatible upgrade. ([#5009](https://github.com/microsoft/AzureTRE/issues/5009))
-* Fix Clean Validation workflow by pinning the Azure CLI version to avoid transient checksum errors from unpinned Azure CLI packages ([#4971](https://github.com/microsoft/AzureTRE/issues/4971))
 
 COMPONENTS:
 
