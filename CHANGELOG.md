@@ -48,6 +48,7 @@ BUG FIXES:
 * Record the existing Databricks firewall prerequisite as reused in bundle evidence. ([#5217](https://github.com/microsoft/AzureTRE/pull/5217))
 * Fill the missing Switzerland North Databricks storage and Event Hubs endpoints for DNS lookup and firewall rules. (`tre-service-databricks` 1.0.20) ([#5140](https://github.com/microsoft/AzureTRE/issues/5140))
 * Delete the Databricks managed resource group when Databricks leaves it after the workspace delete. With the default storage firewall, Event Grid cannot get a SAS for the workspace storage account, and Databricks then leaves the account and its group. (`tre-shared-service-databricks-private-auth` 0.1.17, `tre-service-databricks` 1.0.21)
+* Build the Azure ML firewall service tag names from the region display name. The service tags API uses short region codes such as `switzerlandn` in 12 regions, including Switzerland North, France Central, Germany West Central and Norway East, so Azure ML failed to deploy or delete there. (`tre-service-azureml` 1.1.9)
 * Clean up backup-test workspaces after failed provisioning. ([#5135](https://github.com/microsoft/AzureTRE/issues/5135))
 * Update `aiohttp` from 3.14.3 to 3.14.4 in `api_app`, `resource_processor`, and the CLI to address security advisories. (`API` 0.28.7, `resource_processor` 0.13.15, `CLI` 0.2.13) ([#5270](https://github.com/microsoft/AzureTRE/pull/5270))
 * Rename a test variable in the E2E polling tests so that CodeQL stops reporting false clear-text logging alerts. ([#5266](https://github.com/microsoft/AzureTRE/pull/5266))
