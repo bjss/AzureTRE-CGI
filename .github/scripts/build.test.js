@@ -113,6 +113,22 @@ describe('getCommandFromComment', () => {
       await getCommandFromComment({ core, context, github });
       expect(outputFor(mockCoreSetOutput, 'command')).toBe('none');
     });
+
+    test(`uses permissionGithub for the lookup when provided`, async () => {
+      const permissionGithub = { request: jest.fn().mockResolvedValue({ data: { permission: 'write' } }) };
+      const context = createCommentContext({ username: 'team-only-user', body: '/test' });
+      await getCommandFromComment({ core, context, github, permissionGithub });
+      expect(permissionGithub.request).toHaveBeenCalled();
+      expect(outputFor(mockCoreSetOutput, 'command')).toBe('run-tests');
+    });
+
+    test(`posts the rejection comment with github, not permissionGithub`, async () => {
+      const permissionGithub = { request: jest.fn().mockResolvedValue({ data: { permission: 'read' } }) };
+      const context = createCommentContext({ username: 'read-only', body: '/test' });
+      await getCommandFromComment({ core, context, github, permissionGithub });
+      expect(mockGithubRestIssuesCreateComment).toHaveBeenCalled();
+      expect(outputFor(mockCoreSetOutput, 'command')).toBe('none');
+    });
   });
 
   describe('with contributor', () => {
