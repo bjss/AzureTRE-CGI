@@ -188,6 +188,7 @@ BUG FIXES:
 * Fix Guacamole Windows VM image selections by aligning schema enums/defaults with supported image options in Windows and review VM templates. ([#4963](https://github.com/microsoft/AzureTRE/issues/4963))
 * Remove deprecated `soft_delete_enabled` setting from `azurerm_recovery_services_vault` in base workspace template. ([#4967](https://github.com/microsoft/AzureTRE/issues/4967))
 * Pin MKDocs to v1 to prevent incompatible upgrade. ([#5009](https://github.com/microsoft/AzureTRE/issues/5009))
+* Fix PR bot commands being rejected for users whose write access comes from an organisation team, by checking the user's repository permission level (write, maintain or admin) instead of collaborator membership, and allow an optional `PR_BOT_TOKEN` secret for the bot's permission checks.
 
 COMPONENTS:
 

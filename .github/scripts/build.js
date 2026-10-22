@@ -303,21 +303,27 @@ async function userHasWriteAccessToRepo({ core, github }, username, repoOwner, r
   // Unfortunately, that always shows MEMBER if you are in the microsoft org and have that set to publicly visible
   // (Can check via https://github.com/orgs/microsoft/people?query=<username>)
 
-  // https://docs.github.com/en/rest/reference/collaborators#check-if-a-user-is-a-repository-collaborator
+  // The check-if-collaborator endpoint returns 204 for any access level (including read) and, with the
+  // default GITHUB_TOKEN, 404 for users whose access comes only from an organisation team.
+  // Use the permission endpoint instead and require an explicit write-level permission.
+  // https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user
+  // `permission` is the legacy field: admin, write, read or none (maintain maps to write, triage to read).
   let userHasWriteAccess = false;
   try {
     core.info(`Checking if user "${username}" has write access to ${repoOwner}/${repoName} ...`)
-    const result = await github.request('GET /repos/{owner}/{repo}/collaborators/{username}', {
+    const result = await github.request('GET /repos/{owner}/{repo}/collaborators/{username}/permission', {
       owner: repoOwner,
       repo: repoName,
       username
     });
-    userHasWriteAccess = result.status === 204;
+    const permission = result.data?.permission;
+    core.info(`User permission: ${permission}`);
+    userHasWriteAccess = permission === 'admin' || permission === 'write';
   } catch (err) {
     if (err.status === 404) {
       core.info("User not found in collaborators");
     } else {
-      core.error(`Error checking if user has write access: ${err.status} (${err.response.data.message}) `)
+      core.error(`Error checking if user has write access: ${err.status} (${err.response?.data?.message}) `)
     }
   }
   core.info("User has write access: " + userHasWriteAccess);

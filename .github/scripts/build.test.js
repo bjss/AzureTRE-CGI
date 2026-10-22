@@ -101,6 +101,20 @@ describe('getCommandFromComment', () => {
 
   });
 
+  describe('permission levels', () => {
+    test.each(['admin', 'team-writer'])(`allows %s to run /test`, async (username) => {
+      const context = createCommentContext({ username, body: '/test' });
+      await getCommandFromComment({ core, context, github });
+      expect(outputFor(mockCoreSetOutput, 'command')).toBe('run-tests');
+    });
+
+    test.each(['read-only', 'api-error'])(`does not allow %s to run commands`, async (username) => {
+      const context = createCommentContext({ username, body: '/test' });
+      await getCommandFromComment({ core, context, github });
+      expect(outputFor(mockCoreSetOutput, 'command')).toBe('none');
+    });
+  });
+
   describe('with contributor', () => {
     test(`if doesn't start with '/' should set command to 'none'`, async () => {
       const context = createCommentContext({
