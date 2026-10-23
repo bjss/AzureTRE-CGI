@@ -35,9 +35,3 @@ variable "mgmt_resource_group_name" {
   type        = string
   description = "The management resource group name"
 }
-
-variable "nexus_image_tag" {
-  type        = string
-  description = "The tag of the Nexus image to deploy"
-  default     = "latest"
-}

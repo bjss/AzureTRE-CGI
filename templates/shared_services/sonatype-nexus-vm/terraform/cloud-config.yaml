@@ -47,7 +47,7 @@ runcmd:
   # Give the Nexus process write permissions on the folder mounted as persistent volume
   - chown -R 200 /etc/nexus-data
   # Deploy Nexus container (script handles ACR login via IMDS)
-  - bash /etc/nexus-data/scripts/deploy_nexus_container.sh "${ACR_NAME}" "${NEXUS_IMAGE_TAG}" "${MSI_ID}"
+  - bash /etc/nexus-data/scripts/deploy_nexus_container.sh "${NEXUS_IMAGE}" "${MSI_ID}"
   # Reset the admin password of Nexus to the one created by TF and stored in Key Vault
   - bash /etc/nexus-data/scripts/reset_nexus_password.sh "${NEXUS_ADMIN_PASSWORD}"
   # Invoke Nexus SSL configuration (which will also be ran as CRON daily to renew cert)

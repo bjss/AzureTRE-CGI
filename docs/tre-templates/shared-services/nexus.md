@@ -44,6 +44,39 @@ After verifying the certificate has been generated, you can deploy Nexus:
 
 This will deploy the infrastructure required for Nexus, then start the service and configure it with the repository configurations located in the `./templates/shared_services/sonatype-nexus-vm/scripts/nexus_repos_config` folder. It will also set up HTTPS using the certificate you generated in the previous section, so proxies can be served at `https://nexus-{TRE_ID}.{LOCATION}.cloudapp.azure.com`.
 
+## Nexus image and the eMudhra certificate mitigation
+
+Nexus bundle `3.11.3` and later versions do not import the `sonatype/nexus3` image from Docker Hub.
+The bundle build makes an image from `templates/shared_services/sonatype-nexus-vm/docker/Dockerfile`.
+The bundle publish step pushes this image to the management ACR as `microsoft/azuretre/nexus3`.
+
+The image contains Nexus 3.94.0 and the changes that Sonatype made to the Nexus 3.97.2 images for the [compromised eMudhra intermediate CA certificates](https://help.sonatype.com/en/compromised-emudhra-intermediate-ca-certificates.html):
+
+- The image has Alpine `ca-certificates` version `20261020-r0` or later. This version removes the related root certificates.
+- The JDK `blocked.certs` file blocks the 16 compromised intermediate certificates and the 4 related root certificates. The JDK then rejects these certificates from all trust stores. This includes the Nexus truststore.
+- The image build fails if the JDK trusts one of the advisory certificate chains.
+
+The bundle keeps Nexus at version 3.94.0 because Nexus 3.97.0 and later versions need [required base telemetry](https://help.sonatype.com/en/nexus-repository-telemetry.html).
+If the telemetry uploads fail for a period, these versions become read-only.
+
+Nexus does not trust a certificate that chains only to one of these root certificates:
+
+- `emSign ECC Root CA - G3`
+- `emSign Root TLS CA - G3`
+- `emSign Root CS CA - G3`
+- `AAA Certificate Services`
+
+The default Nexus repositories do not use these root certificates.
+
+To build the bundle, you need Docker and access to Docker Hub and the Alpine package repository (`dl-cdn.alpinelinux.org`).
+If you copy images to your own registry, copy the image that the bundle build makes.
+Do not use `az acr import` to copy `sonatype/nexus3` for this bundle. That image does not contain the eMudhra changes.
+
+To apply the changes to an existing Nexus service, upgrade it to bundle `3.11.3` or later.
+The upgrade replaces the Nexus container and keeps the Nexus data in `/etc/nexus-data` on the VM.
+Nexus is not available while the new container starts.
+The Nexus version and its database do not change.
+
 ## Upgrade apt repositories to raw proxies
 
 Nexus bundle `3.11.0` replaces the `ubuntu`, `ubuntu-security`, `docker` and `microsoft-apt` apt repositories with raw proxies.

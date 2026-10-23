@@ -1,17 +1,18 @@
 ---
 schemaVersion: 1.0.0
 name: tre-shared-service-sonatype-nexus
-version: 3.11.2
+version: 3.11.3
 description: "A Sonatype Nexus shared service"
 dockerfile: Dockerfile.tmpl
 registry: azuretre
 
 custom:
   runtime_image:
-    name: sonatype/nexus3
-    import:
-      source: docker.io/sonatype/nexus3
-      tag: "3.94.0"
+    name: nexus3
+    build:
+      version_file: docker/version.txt
+      docker_file: docker/Dockerfile
+      docker_context: docker
 
 credentials:
   - name: azure_tenant_id
@@ -114,7 +115,6 @@ install:
         vm_size: ${ bundle.parameters.vm_size }
         mgmt_acr_name: ${ bundle.parameters.mgmt_acr_name }
         mgmt_resource_group_name: ${ bundle.parameters.mgmt_resource_group_name }
-        nexus_image_tag: ${ bundle.custom.runtime_image.import.tag }
       backendConfig:
         use_azuread_auth: "true"
         use_oidc: "true"
@@ -141,7 +141,6 @@ upgrade:
         vm_size: ${ bundle.parameters.vm_size }
         mgmt_acr_name: ${ bundle.parameters.mgmt_acr_name }
         mgmt_resource_group_name: ${ bundle.parameters.mgmt_resource_group_name }
-        nexus_image_tag: ${ bundle.custom.runtime_image.import.tag }
       backendConfig:
         use_azuread_auth: "true"
         use_oidc: "true"
@@ -168,7 +167,6 @@ uninstall:
         vm_size: ${ bundle.parameters.vm_size }
         mgmt_acr_name: ${ bundle.parameters.mgmt_acr_name }
         mgmt_resource_group_name: ${ bundle.parameters.mgmt_resource_group_name }
-        nexus_image_tag: ${ bundle.custom.runtime_image.import.tag }
       backendConfig:
         use_azuread_auth: "true"
         use_oidc: "true"
