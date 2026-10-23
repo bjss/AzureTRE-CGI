@@ -150,6 +150,25 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertEqual(report["resources"], [])
         self.assertEqual(report["declared_prerequisites"], {})
 
+    def test_databricks_selections_are_independent_and_keep_dependencies_explicit(self):
+        cases = (
+            ("tre-shared-service-databricks-private-auth", "test_private_auth_lifecycle", set()),
+            (
+                "tre-service-databricks",
+                "test_private_databricks_lifecycle",
+                {"tre-workspace-base", "tre-shared-service-firewall", "tre-shared-service-databricks-private-auth"},
+            ),
+        )
+        for bundle, case, prerequisites in cases:
+            with self.subTest(bundle=bundle):
+                result, report = self.run_selector("--bundle", bundle, "--collect-only")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(report["collected_tests"], ["test_databricks.py::" + case])
+                self.assertEqual(set(report["declared_prerequisites"]), prerequisites)
+                self.assertEqual(report["status"], "not_run")
+                self.assertFalse(report["full_lifecycle_proven"])
+                self.assertEqual(report["resources"], [])
+
     def test_unknown_partial_and_shell_like_identifiers_fail_before_collection(self):
         for identifier in ("azuresql", "tre-nonexistent", SQL + "; echo unexpected", SQL + "$(echo unexpected)"):
             with self.subTest(identifier=identifier):
