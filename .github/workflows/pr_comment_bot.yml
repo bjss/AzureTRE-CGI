@@ -53,7 +53,7 @@ jobs:
             const script = require('./.github/scripts/build.js')
             // Permission lookups use PR_BOT_TOKEN (org Members read) when set, as GITHUB_TOKEN cannot see team-based access.
             // Comments and labels always use GITHUB_TOKEN.
-            const permissionGithub = process.env.PR_BOT_TOKEN ? getOctokit(process.env.PR_BOT_TOKEN) : github;
+            const permissionGithub = process.env.PR_BOT_TOKEN ? new github.constructor({ auth: process.env.PR_BOT_TOKEN, baseUrl: process.env.GITHUB_API_URL }) : github;
             await script.getCommandFromComment({core, context, github, permissionGithub});
 
       - name: Output PR details
