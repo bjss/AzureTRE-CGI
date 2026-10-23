@@ -6,6 +6,7 @@
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
 
 ENHANCEMENTS:
+* Add a private MySQL lifecycle check. A Nexus-backed Linux VM writes a row through private DNS, the SKU changes from Burstable to General Purpose, and the VM reads the row again. ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
 * Add independent private OHDSI lifecycle validation with callback, firewall, shared DNS preservation and bounded cleanup checks. ([#5149](https://github.com/microsoft/AzureTRE/issues/5149))
 * Add an independent CycleCloud server lifecycle with marketplace checks, VM power actions and bounded cleanup. ([#5159](https://github.com/microsoft/AzureTRE/issues/5159))
 * Add separate Databricks and private-authentication lifecycle selections with isolation checks, private ARM configuration checks and bounded cleanup. (`build-scripts` 1.1.6) ([#5140](https://github.com/microsoft/AzureTRE/issues/5140), [#5160](https://github.com/microsoft/AzureTRE/issues/5160))
