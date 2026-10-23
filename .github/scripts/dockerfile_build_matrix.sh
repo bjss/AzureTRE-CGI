@@ -44,6 +44,7 @@ plain_targets=(
   "api_app/Dockerfile|api_app|"
   "resource_processor/vmss_porter/Dockerfile|resource_processor|"
   "templates/shared_services/gitea/docker/Dockerfile|templates/shared_services/gitea/docker|"
+  "templates/shared_services/sonatype-nexus-vm/docker/Dockerfile|templates/shared_services/sonatype-nexus-vm/docker|"
   "templates/workspace_services/gitea/docker/Dockerfile|templates/workspace_services/gitea/docker|"
   "templates/workspace_services/guacamole/e2e-tests/playwright/Dockerfile|templates/workspace_services/guacamole/e2e-tests/playwright|"
   "templates/workspace_services/guacamole/guacamole-server/docker/Dockerfile|templates/workspace_services/guacamole/guacamole-server|"

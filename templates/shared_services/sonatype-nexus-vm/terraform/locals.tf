@@ -12,4 +12,7 @@ locals {
   }
   cmk_name                 = "tre-encryption-${var.tre_id}"
   encryption_identity_name = "id-encryption-${var.tre_id}"
+  # The bundle build pushes this image to the management ACR. See ../docker/Dockerfile.
+  nexus_image_version = replace(replace(replace(file("${path.module}/../docker/version.txt"), "__version__ = \"", ""), "\"", ""), "\n", "")
+  nexus_image         = "${data.azurerm_container_registry.mgmt_acr.login_server}/microsoft/azuretre/nexus3:${local.nexus_image_version}"
 }

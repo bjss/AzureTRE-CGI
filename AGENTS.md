@@ -69,6 +69,7 @@ Refresh the target repository's base ref, such as `upstream/main` for a fork. Af
 | Porter bundle | The changed bundle's `porter.yaml` |
 | Guacamole server image | `templates/workspace_services/guacamole/guacamole-server/docker/version.txt` |
 | Gitea image | `templates/shared_services/gitea/docker/version.txt` |
+| Nexus image | `templates/shared_services/sonatype-nexus-vm/docker/version.txt` |
 | GitHub scripts | `.github/scripts/package.json` and corresponding lockfile metadata |
 
 Formatting-only changes can still require component version bumps. Inspect CI path filters when deciding whether metadata changes are needed. For example, `ui/app/**/*` triggers the UI version check, including Markdown files in that directory.
