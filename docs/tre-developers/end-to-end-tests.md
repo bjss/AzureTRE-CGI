@@ -159,6 +159,17 @@ The VM reads the administrator password from the workspace Key Vault through a t
 The MySQL job uses the SQL time limits above with its own `MYSQL_VALIDATION_DEADLINE`. If the case creates Nexus, it removes Nexus after the VM.
 These checks do not prove previous-version upgrades or researcher access.
 
+### Health selection
+
+Select `tre-workspace-service-health` to run `test_health.py::test_private_fhir_access_and_dicom_update`.
+The case creates its own workspace, Guacamole service, Windows VM and Health service with FHIR R4.
+From the VM, the case makes sure that the FHIR host resolves to a private address and that the FHIR metadata is available.
+It also makes sure that FHIR rejects a data request without a token (HTTP 401) and from an identity without a role (HTTP 403).
+The case then gives the VM identity a temporary FHIR Data Contributor role on the FHIR service and writes a Patient.
+An update adds DICOM. The case reads the Patient again and makes sure that the DICOM host is private and needs a token.
+At the end, the case makes sure that the Health workspace, FHIR and DICOM have public network access disabled.
+The Health job uses the SQL time limits with its own `HEALTH_VALIDATION_DEADLINE`.
+
 ### Run the branch workflow before merge
 
 1. Push the reviewed changes to a branch in `microsoft/AzureTRE`.

@@ -6,6 +6,7 @@
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
 
 ENHANCEMENTS:
+* Add a private Health lifecycle check. A workspace VM reads the FHIR metadata through private DNS, gets HTTP 401 without a token and HTTP 403 without a role, then writes and reads a Patient across an update that adds DICOM. ([#5147](https://github.com/microsoft/AzureTRE/issues/5147))
 * Add a private MySQL lifecycle check. A Nexus-backed Linux VM writes a row through private DNS, the SKU changes from Burstable to General Purpose, and the VM reads the row again. ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
 * Enable `user_management_enabled`, `auto_workspace_group_creation`, and `auto_grant_workspace_consent` by default in `config.sample.yaml` for a better out-of-the-box experience ([#5050](https://github.com/microsoft/AzureTRE/issues/5050))
