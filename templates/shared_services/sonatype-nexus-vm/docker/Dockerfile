@@ -13,19 +13,20 @@ RUN apk add --no-cache --upgrade "ca-certificates-bundle>=20261020-r0" "ca-certi
 # Block the 16 compromised intermediates and the 4 roots in the JDK. The JDK then rejects these
 # certificates from every trust store. This includes the Nexus truststore.
 # EmudhraChainCheck fails the build if this JDK trusts one of the advisory chains.
-COPY revoked-certs/ /tmp/emudhra-build/
-RUN set -e; \
+# The build mounts revoked-certs/ only for this step, so no image layer contains the copied files.
+RUN --mount=type=bind,source=revoked-certs,target=/tmp/emudhra-build \
+    set -e; \
     jh=/usr/lib/jvm/default-jvm; \
     f=$(readlink -f "$jh/lib/security/blocked.certs"); \
     [ -f "$f" ]; \
-    grep -v '^#' /tmp/emudhra-build/revoked-intermediates.sha256 > /tmp/emudhra-build/intermediates; \
+    grep -v '^#' /tmp/emudhra-build/revoked-intermediates.sha256 > /tmp/emudhra-intermediates; \
     echo >> "$f"; \
-    cat /tmp/emudhra-build/intermediates >> "$f"; \
-    while read -r h; do grep -qx "$h" "$f"; done < /tmp/emudhra-build/intermediates; \
+    cat /tmp/emudhra-intermediates >> "$f"; \
+    while read -r h; do grep -qx "$h" "$f"; done < /tmp/emudhra-intermediates; \
     sh /tmp/emudhra-build/distrust-emudhra-roots.sh jre "$jh" "$(readlink -f "$jh/lib/security/cacerts")"; \
     sh /tmp/emudhra-build/distrust-emudhra-roots.sh check "$jh" /etc/ssl/certs/ca-certificates.crt; \
     "$jh/bin/java" /tmp/emudhra-build/emudhra/EmudhraChainCheck.java \
         /tmp/emudhra-build/emudhra/chains /tmp/emudhra-build/emudhra/emudhra-roots.pem; \
-    rm -rf /tmp/emudhra-build
+    rm -rf /tmp/emudhra-intermediates /tmp/hsperfdata_root
 
 USER nexus
