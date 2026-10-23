@@ -271,6 +271,14 @@ The VM reads the administrator password from the workspace Key Vault through a t
 The MySQL job uses the SQL time limits above with its own `MYSQL_VALIDATION_DEADLINE`. If the case creates Nexus, it removes Nexus after the VM.
 These checks do not prove previous-version upgrades or researcher access.
 
+### Linux VM selection
+
+Select `tre-service-guacamole-linuxvm` to run `test_guacamole_linuxvm.py::test_create_guacamole_linux_vm`.
+The case creates a Linux VM and waits for its Nexus-backed bootstrap. Thus the run needs a suitable Nexus instance or `acceptNexusEula=true`.
+The case then runs the `stop`, `start` and `reset_password` actions.
+After `stop` and `start`, the case reads the VM power state from Azure. After `reset_password`, it makes sure that the Key Vault secret has a new version.
+The case does not sign in to the VM, so it does not prove interactive access or the new password.
+
 ### Health selection
 
 Select `tre-workspace-service-health` to run `test_health.py::test_private_fhir_access_and_dicom_update`.
