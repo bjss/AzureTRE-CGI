@@ -26,8 +26,13 @@ jobs:
       - id: check_command
         name: Check for a command using GitHub script
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PR_BOT_TOKEN: ${{ secrets.PR_BOT_TOKEN }}
         with:
           result-encoding: string
           script: |
             const script = require('./.github/scripts/build.js')
-            await script.labelAsExternalIfAuthorDoesNotHaveWriteAccess({core, context, github});
+            // Permission lookups use PR_BOT_TOKEN (org Members read) when set, as GITHUB_TOKEN cannot see team-based access.
+            // Labels always use GITHUB_TOKEN.
+            const permissionGithub = process.env.PR_BOT_TOKEN ? new github.constructor({ auth: process.env.PR_BOT_TOKEN, baseUrl: process.env.GITHUB_API_URL }) : github;
+            await script.labelAsExternalIfAuthorDoesNotHaveWriteAccess({core, context, github, permissionGithub});
