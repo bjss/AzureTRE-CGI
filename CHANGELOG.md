@@ -6,6 +6,7 @@
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
 
 ENHANCEMENTS:
+* Check that an export keeps its submitted content. After the submit, the export review check writes through the old draft SAS for 2 minutes, then makes sure that an overwrite, a new blob and a delete fail. The review copy and the approved export must hold only the submitted file with its submitted hash. ([#5264](https://github.com/microsoft/AzureTRE/issues/5264))
 * Add independent export review-VM validation with a private synthetic upload, review-data hash verification and automatic VM deletion. ([#5143](https://github.com/microsoft/AzureTRE/issues/5143))
 * Record the deployed template version of each resource that a bundle test reads in the bundle evidence, without the resource properties.
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))

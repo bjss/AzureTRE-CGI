@@ -98,8 +98,14 @@ The case creates a separate workspace, Guacamole service and minimal Windows upl
 It ignores configured workspace and service IDs and preserves any reused Nexus and certificate services.
 The upload VM sends one synthetic blob to the export draft through the workspace private endpoint.
 The SAS is a protected Run Command parameter. The probe does not print it.
+The submission fixes the content. Before the submit, the case starts a second probe on the upload VM with a start time.
+The case submits the request before that time, so each write of the probe comes after the submission.
+For 2 minutes the probe writes changed content through the old draft SAS, and it counts the writes that Azure accepts.
+It then tries an overwrite, a new blob and a delete through the same SAS. Each attempt must fail.
 After the request reaches `in_review`, the case creates an export review VM in the same workspace.
-It checks the downloaded file's hash before approval, then waits for automatic VM deletion.
+The review copy must hold only the submitted file with the submitted hash, also if a write after the submission passed.
+After the approval, the test runner lists and downloads the approved export through the API link. It must hold only the submitted file with the submitted hash.
+The case then waits for automatic VM deletion.
 Both VM bundle versions must match the checkout. The evidence report records their observed versions.
 Recovery cleanup cannot turn failed automatic deletion into a passing result.
 

@@ -282,7 +282,10 @@
       "coverage": [
         "install",
         "synthetic-review-data",
+        "old-draft-sas-writes-after-submission",
+        "review-copy-integrity",
         "export-approval",
+        "approved-copy-integrity",
         "automatic-uninstall"
       ],
       "limitations": [
