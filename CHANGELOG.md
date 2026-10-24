@@ -6,6 +6,7 @@
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
 
 ENHANCEMENTS:
+* Add a `Request-Id` header with the trace ID to each API response, also to an HTTP 500. The E2E operation poll already logs this header, so a failed poll can be found in App Insights. (`api` 0.28.8) ([#5202](https://github.com/microsoft/AzureTRE/issues/5202))
 * Run the `stop`, `start` and `reset_password` actions in the Guacamole Linux VM check, and make sure of the VM power state and the new Key Vault secret version through Azure. ([#5145](https://github.com/microsoft/AzureTRE/issues/5145))
 * Add a private Health lifecycle check. A workspace VM reads the FHIR metadata through private DNS, gets HTTP 401 without a token and HTTP 403 without a role, then writes and reads a Patient across an update that adds DICOM. The generic workspace service install case no longer installs Health, because its CI workspace has no Entra ID groups. ([#5147](https://github.com/microsoft/AzureTRE/issues/5147))
 * Add a private MySQL lifecycle check. A Nexus-backed Linux VM writes a row through private DNS, the SKU changes from Burstable to General Purpose, and the VM reads the row again. ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
