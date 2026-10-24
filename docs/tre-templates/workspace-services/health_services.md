@@ -24,9 +24,11 @@ Before version 0.3.9, an update did not replace the endpoint.
 If you added FHIR or DICOM to an existing service before this version, the new host can resolve to a public address.
 To repair the service, delete its private endpoint `pe-hs<suffix>` in Azure, then upgrade the service. Terraform then creates the endpoint again.
 
-The DICOM service has public network access turned off.
+The FHIR service and the DICOM service have public network access turned off.
 Before version 0.3.10, Terraform created the DICOM service with public network access on.
-An upgrade to version 0.3.10 turns it off.
+Before version 0.3.11, the FHIR service kept the Azure default, which is public network access on.
+The azurerm provider cannot set this value for FHIR, so the bundle sets it with the azapi provider.
+An upgrade to version 0.3.11 turns off public network access on both services.
 
 ## Authentication
 

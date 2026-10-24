@@ -26,3 +26,13 @@ class HealthBundleContractTests(unittest.TestCase):
         source = (BUNDLE / "main.tf").read_text()
         dicom = block(source, 'resource "azurerm_healthcare_dicom_service" "dicom"')
         self.assertRegex(dicom, r"\n  public_network_access_enabled\s*=\s*false\n")
+
+    def test_fhir_public_network_access_is_off_after_each_change(self):
+        # The azurerm provider can only read this value, and it sends no value when it updates FHIR.
+        source = (BUNDLE / "main.tf").read_text()
+        update = block(source, 'resource "azapi_update_resource" "fhir_public_network_access"')
+        self.assertIn("resource_id = azurerm_healthcare_fhir_service.fhir[0].id", update)
+        self.assertRegex(update, r'publicNetworkAccess\s*=\s*"Disabled"')
+        self.assertRegex(
+            update, r"replace_triggered_by\s*=\s*\[azurerm_healthcare_fhir_service\.fhir\[count\.index\]\]"
+        )

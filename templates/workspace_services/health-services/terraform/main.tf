@@ -29,6 +29,24 @@ resource "azurerm_healthcare_fhir_service" "fhir" {
   lifecycle { ignore_changes = [tags] }
 }
 
+# The provider can only read this value, and Azure turns on public network access by default.
+resource "azapi_update_resource" "fhir_public_network_access" {
+  count       = var.deploy_fhir ? 1 : 0
+  type        = "Microsoft.HealthcareApis/workspaces/fhirservices@2024-03-31"
+  resource_id = azurerm_healthcare_fhir_service.fhir[0].id
+
+  body = {
+    properties = {
+      publicNetworkAccess = "Disabled"
+    }
+  }
+
+  lifecycle {
+    # The provider sends no value when it updates the FHIR service, so set the value again.
+    replace_triggered_by = [azurerm_healthcare_fhir_service.fhir[count.index]]
+  }
+}
+
 resource "azurerm_healthcare_dicom_service" "dicom" {
   count        = var.deploy_dicom ? 1 : 0
   name         = "dicom${local.service_resource_name_suffix}"
