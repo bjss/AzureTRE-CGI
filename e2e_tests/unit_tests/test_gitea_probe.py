@@ -108,6 +108,12 @@ class ProbeEvidenceTests(unittest.TestCase):
                 self.assertRegex(values[key], patterns[name])
         self.assertRegex(values["probe_id"], patterns["ProbeId"])
 
+    def test_script_offers_the_tls_version_that_the_web_app_requires(self):
+        # A TLS handshake failure leaves no request in the web app logs.
+        webapp = (ROOT / "templates/workspace_services/gitea/terraform/gitea-webapp.tf").read_text()
+        version = re.search(r'minimum_tls_version\s*=\s*"1\.(\d)"', webapp).group(1)
+        self.assertIn(f"[Net.SecurityProtocolType]::Tls1{version}", probe.SCRIPT.read_text())
+
 
 class ProbeRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_command_is_removed(self):

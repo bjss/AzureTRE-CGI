@@ -7,7 +7,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# The Gitea web app accepts only TLS 1.3.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 $stage = 'private-dns'
 $api = "$GiteaUrl/api/v1"
 $admin = 'giteaadmin'
