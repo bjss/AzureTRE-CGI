@@ -7,7 +7,7 @@ Setting to `false` will delete existing airlock storage accounts and must only b
 
 ENHANCEMENTS:
 * Add a private MySQL lifecycle check. A Nexus-backed Linux VM writes a row through private DNS, the SKU changes from Burstable to General Purpose, and the VM reads the row again. ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
-* Add a private Gitea lifecycle check. A workspace VM uses the Gitea API through private DNS, gets HTTP 401 without credentials and with a wrong password, and commits a file to a private repository. The VM reads the file again after an update and an app restart. ([#5141](https://github.com/microsoft/AzureTRE/issues/5141))
+* Add a private Gitea lifecycle check. A workspace VM uses the Gitea API through private DNS, gets HTTP 401 without credentials and with a wrong password, and commits a file to a private repository. The VM reads the file again after an update and an app restart. The check also makes sure that the console log of the web app shows no secret. ([#5141](https://github.com/microsoft/AzureTRE/issues/5141))
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
 * Enable `user_management_enabled`, `auto_workspace_group_creation`, and `auto_grant_workspace_consent` by default in `config.sample.yaml` for a better out-of-the-box experience ([#5050](https://github.com/microsoft/AzureTRE/issues/5050))
 * Add shared repository instructions and TRE-prefixed component skills for agent-assisted development, security review, validation and troubleshooting. ([#5111](https://github.com/microsoft/AzureTRE/issues/5111))
