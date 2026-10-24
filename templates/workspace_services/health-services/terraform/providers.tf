@@ -5,10 +5,6 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "= 4.58.0"
     }
-    azapi = {
-      source  = "Azure/azapi"
-      version = "= 2.8.0"
-    }
   }
 
   backend "azurerm" {}
@@ -31,8 +27,6 @@ provider "azurerm" {
   }
   storage_use_azuread = true
 }
-
-provider "azapi" {}
 
 module "terraform_azurerm_environment_configuration" {
   source          = "git::https://github.com/microsoft/terraform-azurerm-environment-configuration.git?ref=0.7.0"

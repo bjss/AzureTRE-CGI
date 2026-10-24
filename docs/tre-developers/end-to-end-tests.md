@@ -292,7 +292,8 @@ The case then gives the VM identity a temporary FHIR Data Contributor role on th
 An update adds DICOM. The case reads the Patient again and makes sure that the DICOM host is private and needs a token.
 At the end, the case sends FHIR and DICOM requests without a token from the test runner, outside the workspace network.
 Azure must reject each request with HTTP 403. The case tries again for up to 5 minutes, because Azure can take this time to block public traffic.
-The case then reads the Health workspace, FHIR and DICOM again, and makes sure that each has public network access disabled.
+The case then reads the Health workspace and DICOM again, and makes sure that each has public network access disabled.
+The case does not read this value on FHIR. Azure keeps `publicNetworkAccess` `Enabled` on FHIR, also after a request sets `Disabled`.
 The Health job uses the SQL time limits with its own `HEALTH_VALIDATION_DEADLINE`.
 
 ### Gitea selection
