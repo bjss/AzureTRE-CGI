@@ -9,6 +9,7 @@ from vmss_porter.runner import (
     check_runners,
     runner,
     run_porter,
+    worker_config,
     _cleanup_param_set,
 )
 import json
@@ -113,13 +114,18 @@ async def test_runner(mock_receive_message, mock_service_bus_client, mock_defaul
         mock_service_bus_client, mock_default_credential, "test_msi_id"
     )
 
-    config = {"vmss_msi_id": "test_msi_id", "service_bus_namespace": "test_namespace", "mgmt_blob_url": "https://mgmt"}
+    config = {
+        "vmss_msi_id": "test_msi_id",
+        "service_bus_namespace": "test_namespace",
+        "mgmt_blob_url": "https://mgmt",
+        "porter_env": {"HOME": "/root"},
+    }
 
     await runner(0, config)
 
     mock_default_credential.assert_called_once_with("test_msi_id")
     mock_service_bus_client.assert_called_once_with("test_namespace", mock_credential)
-    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, config, ANY)
+    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, worker_config(0, config), ANY)
 
     # Verify context manager entered and exited cleanly
     mock_default_credential.return_value.__aenter__.assert_awaited_once()
@@ -136,13 +142,18 @@ async def test_runner_no_msi_id(mock_receive_message, mock_service_bus_client, m
         mock_service_bus_client, mock_default_credential, None
     )
 
-    config = {"vmss_msi_id": None, "service_bus_namespace": "test_namespace", "mgmt_blob_url": "https://mgmt"}
+    config = {
+        "vmss_msi_id": None,
+        "service_bus_namespace": "test_namespace",
+        "mgmt_blob_url": "https://mgmt",
+        "porter_env": {"HOME": "/root"},
+    }
 
     await runner(0, config)
 
     mock_default_credential.assert_called_once_with(None)
     mock_service_bus_client.assert_called_once_with("test_namespace", mock_credential)
-    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, config, ANY)
+    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, worker_config(0, config), ANY)
 
     # Verify context manager entered and exited cleanly
     mock_default_credential.return_value.__aenter__.assert_awaited_once()
@@ -160,20 +171,37 @@ async def test_runner_exception(mock_receive_message, mock_service_bus_client, m
     )
     mock_receive_message.side_effect = Exception("Test Exception")
 
-    config = {"vmss_msi_id": "test_msi_id", "service_bus_namespace": "test_namespace", "mgmt_blob_url": "https://mgmt"}
+    config = {
+        "vmss_msi_id": "test_msi_id",
+        "service_bus_namespace": "test_namespace",
+        "mgmt_blob_url": "https://mgmt",
+        "porter_env": {"HOME": "/root"},
+    }
 
     with pytest.raises(Exception, match="Test Exception"):
         await runner(0, config)
 
     mock_default_credential.assert_called_once_with("test_msi_id")
     mock_service_bus_client.assert_called_once_with("test_namespace", mock_credential)
-    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, config, ANY)
+    mock_receive_message.assert_called_once_with(mock_service_bus_client_instance, worker_config(0, config), ANY)
 
     # Verify context manager entered and exited cleanly, even on exception
     mock_default_credential.return_value.__aenter__.assert_awaited_once()
     mock_default_credential.return_value.__aexit__.assert_awaited_once()
     mock_service_bus_client.return_value.__aenter__.assert_awaited_once()
     mock_service_bus_client.return_value.__aexit__.assert_awaited_once()
+
+
+def test_each_worker_has_its_own_azure_cli_folder():
+    # Two workers that share one folder can read a profile file that the other one writes.
+    config = {"porter_env": {"HOME": "/root", "PATH": "/bin"}}
+
+    first, second = worker_config(0, config), worker_config(1, config)
+
+    assert first["porter_env"]["AZURE_CONFIG_DIR"] == "/root/.azure-worker-0"
+    assert second["porter_env"]["AZURE_CONFIG_DIR"] == "/root/.azure-worker-1"
+    assert first["porter_env"]["PATH"] == "/bin"
+    assert "AZURE_CONFIG_DIR" not in config["porter_env"]
 
 
 @pytest.mark.asyncio
@@ -190,6 +218,7 @@ async def test_default_credentials_closes_real_credential_on_exception(mock_serv
             "vmss_msi_id": "test_msi_id",
             "service_bus_namespace": "test_namespace",
             "mgmt_blob_url": "https://mgmt",
+            "porter_env": {"HOME": "/root"},
         }
 
         with pytest.raises(Exception, match="Test Exception"):
