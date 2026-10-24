@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -14,6 +15,9 @@ from e2e_tests.resources.sql_probe import COMPUTE_API, delete_after
 
 SCRIPT = Path(__file__).with_suffix(".ps1")
 PROBE_TIMEOUT_SECONDS = 15 * 60
+# A tamper probe waits for its start time, writes for 2 minutes, then waits up to 10 minutes for the handover.
+TAMPER_TIMEOUT_SECONDS = 25 * 60
+TAMPER_ATTEMPTS = ("overwrite", "add", "delete")
 MARKER = "AIRLOCK_PROBE_RESULT="
 
 
@@ -29,8 +33,8 @@ def validate_parameters(vm_id, location, *, phase, probe_id, blob_name, content,
         raise ValueError("Expected an Azure VM resource ID")
     if not isinstance(location, str) or not re.fullmatch(r"[a-z0-9]+", location):
         raise ValueError("Expected an Azure region name")
-    if phase not in ("upload", "read"):
-        raise ValueError("Expected an upload or read probe phase")
+    if phase not in ("upload", "read", "tamper"):
+        raise ValueError("Expected an upload, read or tamper probe phase")
     if not isinstance(probe_id, str) or not re.fullmatch(r"[a-f0-9]{32}", probe_id):
         raise ValueError("Expected a 32-character probe ID")
     if not isinstance(blob_name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", blob_name):
@@ -78,6 +82,22 @@ def _unique_object(items):
     return dict(items)
 
 
+def tamper_evidence(evidence, probe_id, expected_hash):
+    """A tamper probe reports how many writes Azure accepted and the final status of each attempt."""
+    final = evidence.get("final")
+    if (
+        set(evidence) != {"phase", "probe", "sha256", "accepted_writes", "final"}
+        or (evidence["phase"], evidence["probe"], evidence["sha256"]) != ("tamper", probe_id, expected_hash)
+        or type(evidence["accepted_writes"]) is not int
+        or evidence["accepted_writes"] < 0
+        or not isinstance(final, dict)
+        or set(final) != set(TAMPER_ATTEMPTS)
+        or any(type(code) is not int for code in final.values())
+    ):
+        raise AssertionError("Airlock tamper probe returned invalid evidence")
+    return evidence
+
+
 def probe_result(resource, *, phase, probe_id, expected_hash):
     """Accept only the exact successful evidence emitted by this probe."""
     properties = resource.get("properties", {})
@@ -97,13 +117,15 @@ def probe_result(resource, *, phase, probe_id, expected_hash):
         evidence = json.loads(lines[0][len(MARKER) :], object_pairs_hook=_unique_object)
     except (ValueError, TypeError):
         raise AssertionError("Airlock probe returned invalid evidence") from None
+    if phase == "tamper":
+        return tamper_evidence(evidence, probe_id, expected_hash)
     expected = {"phase": phase, "probe": probe_id, "sha256": expected_hash}
     if evidence != expected:
         raise AssertionError("Airlock probe data did not match the expected content")
     return True
 
 
-async def run_probe(arm, vm_id, location, *, phase, probe_id, blob_name, content, container_url=None):
+async def run_probe(arm, vm_id, location, *, phase, probe_id, blob_name, content, container_url=None, start_at=None):
     encoded = validate_parameters(
         vm_id,
         location,
@@ -121,10 +143,15 @@ async def run_probe(arm, vm_id, location, *, phase, probe_id, blob_name, content
         "ContentBase64": base64.b64encode(encoded).decode("ascii"),
         "ExpectedSha256": expected_hash,
     }
+    if (phase == "tamper") != isinstance(start_at, datetime):
+        raise ValueError("Only a tamper probe has a start time")
+    if phase == "tamper":
+        parameters["StartAt"] = start_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timeout = TAMPER_TIMEOUT_SECONDS if phase == "tamper" else PROBE_TIMEOUT_SECONDS
     properties = {
         "source": {"script": SCRIPT.read_text()},
         "parameters": [{"name": name, "value": value} for name, value in parameters.items()],
-        "timeoutInSeconds": 600,
+        "timeoutInSeconds": timeout - 5 * 60,
         "treatFailureAsDeploymentFailure": True,
     }
     if container_url is not None:
@@ -132,10 +159,11 @@ async def run_probe(arm, vm_id, location, *, phase, probe_id, blob_name, content
     command = f"{vm_id}/runCommands/airlock-probe-{uuid4().hex}"
     # An accepted PUT can lose its response. Register cleanup before sending it.
     async with delete_after(arm, command, COMPUTE_API):
-        async with asyncio.timeout(PROBE_TIMEOUT_SECONDS):
+        async with asyncio.timeout(timeout):
             await arm.request("PUT", command, COMPUTE_API, body={"location": location, "properties": properties})
             while True:
                 resource = await arm.request("GET", command, COMPUTE_API, expand=True)
-                if probe_result(resource, phase=phase, probe_id=probe_id, expected_hash=expected_hash):
-                    return
+                result = probe_result(resource, phase=phase, probe_id=probe_id, expected_hash=expected_hash)
+                if result:
+                    return result if phase == "tamper" else None
                 await asyncio.sleep(10)
