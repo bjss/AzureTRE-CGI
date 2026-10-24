@@ -227,3 +227,61 @@ class ProbeCommandTests(unittest.IsolatedAsyncioTestCase):
                 await self.run_probe(arm, phase="upload", container_url=url)
             self.assertNotIn("private-sas-value", str(raised.exception))
             arm.request.assert_not_awaited()
+
+
+TAMPER = {"phase": "tamper", "accepted_writes": 2, "final": {"overwrite": 404, "add": 404, "delete": 404}}
+
+
+class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tamper_probe_starts_at_the_given_time_and_returns_its_evidence(self):
+        from datetime import datetime, timezone
+
+        arm = SimpleNamespace(request=AsyncMock(side_effect=[{}, result(**TAMPER)]), delete=AsyncMock())
+        start = datetime(2026, 10, 24, 1, 2, 3, tzinfo=timezone.utc)
+        evidence = await probe.run_probe(
+            arm,
+            VM_ID,
+            "switzerlandnorth",
+            **{**PARAMETERS, "phase": "tamper"},
+            container_url=CONTAINER_URL,
+            start_at=start,
+        )
+        self.assertEqual(evidence["accepted_writes"], 2)
+        properties = arm.request.call_args_list[0].kwargs["body"]["properties"]
+        values = {item["name"]: item["value"] for item in properties["parameters"]}
+        self.assertEqual(values["StartAt"], "2026-10-24T01:02:03Z")
+        self.assertEqual(properties["timeoutInSeconds"], probe.TAMPER_TIMEOUT_SECONDS - 5 * 60)
+        arm.delete.assert_awaited_once()
+
+    async def test_only_a_tamper_probe_has_a_start_time(self):
+        from datetime import datetime, timezone
+
+        arm = SimpleNamespace(request=AsyncMock(), delete=AsyncMock())
+        for phase, start in (("tamper", None), ("upload", datetime.now(timezone.utc))):
+            with self.subTest(phase=phase), self.assertRaisesRegex(ValueError, "start time"):
+                await probe.run_probe(
+                    arm,
+                    VM_ID,
+                    "switzerlandnorth",
+                    **{**PARAMETERS, "phase": phase},
+                    container_url=CONTAINER_URL,
+                    start_at=start,
+                )
+        arm.request.assert_not_awaited()
+
+    def test_tamper_evidence_needs_every_attempt_as_a_number(self):
+        def check(**overrides):
+            return probe.probe_result(
+                result(**{**TAMPER, **overrides}), phase="tamper", probe_id=PROBE_ID, expected_hash=HASH
+            )
+
+        self.assertEqual(check()["final"]["overwrite"], 404)
+        for overrides in (
+            {"accepted_writes": -1},
+            {"accepted_writes": "2"},
+            {"final": {"overwrite": 404, "add": 404}},
+            {"final": {"overwrite": "404", "add": 404, "delete": 404}},
+            {"sha256": "0" * 64},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(AssertionError):
+                check(**overrides)

@@ -41,6 +41,16 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.events = []
         self.identity = token(["WorkspaceOwner", "AirlockManager"])
+        self.tamper_final = {"overwrite": 404, "add": 404, "delete": 404}
+        # The real lead gives the Run Command time to start. A test needs no wait.
+        self.enterContext(patch.object(export, "TAMPER_LEAD_SECONDS", 2))
+        self.enterContext(
+            patch.object(
+                export,
+                "assert_approved_copy",
+                AsyncMock(side_effect=lambda *args: self.events.append("approved-copy")),
+            )
+        )
         self.enterContext(
             patch.dict(
                 os.environ,
@@ -176,6 +186,7 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def post(payload, endpoint, *args):
             if endpoint.endswith("/submit"):
                 self.events.append("submit")
+                self.submitted_at = export.datetime.now(export.timezone.utc)
                 return {"airlockRequest": {"status": "submitted"}}
             if endpoint.endswith("/review"):
                 self.events.append("approve")
@@ -187,10 +198,16 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.events.append(phase)
             if (phase == "read" and self.fail_read) or (phase == "upload" and self.fail_upload):
                 raise AssertionError("probe failed")
-            if phase == "upload":
+            if phase in ("upload", "tamper"):
                 self.assertIn("container_url", kwargs)
             else:
                 self.assertNotIn("container_url", kwargs)
+            if phase == "tamper":
+                # The probe runs across the submit. Its first write attempt must come after it.
+                while "submit" not in self.events:
+                    await asyncio.sleep(0)
+                self.assertGreater(kwargs["start_at"], self.submitted_at)
+                return {"accepted_writes": 0, "final": self.tamper_final}
 
         async def deletion(*args):
             self.events.append("automatic-delete")
@@ -227,12 +244,14 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 "seed",
                 "draft",
                 "upload",
+                "tamper",
                 "submit",
                 "in_review",
                 "review",
                 "read",
                 "approve",
                 "approved",
+                "approved-copy",
                 "automatic-delete",
                 "recover-review",
                 "delete-seed",
@@ -250,6 +269,13 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.probe.await_args_list[0].kwargs["content"], self.probe.await_args_list[1].kwargs["content"]
         )
+
+    async def test_an_old_draft_sas_that_still_writes_after_the_handover_fails_before_review(self):
+        self.tamper_final = {"overwrite": 201, "add": 404, "delete": 404}
+        with self.assertRaisesRegex(AssertionError, "still changes data after the handover"):
+            await export.test_airlock_export_review_vm_flow(True)
+        self.assertNotIn("review", self.events)
+        self.assertNotIn("approve", self.events)
 
     async def test_failed_upload_never_submits_and_cleans_owned_resources(self):
         self.fail_upload = True
@@ -391,3 +417,39 @@ class ExportDeadlineTests(unittest.IsolatedAsyncioTestCase):
             async with export.export_resources(True):
                 self.fail("The body must not start")
         self.assertEqual(self.events, [])
+
+
+class ApprovedCopyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_approved_copy_must_hold_the_submitted_file_only(self):
+        import hashlib
+
+        import httpx
+
+        content = b"Synthetic export"
+        expected = hashlib.sha256(content).hexdigest()
+        cases = (
+            ("<Name>a.txt</Name>", content, None),
+            ("<Name>a.txt</Name><Name>added-a.txt</Name>", content, "other files"),
+            ("<Name>a.txt</Name>", b"Changed", "changed"),
+        )
+        for listing, blob, error in cases:
+
+            def respond(request, listing=listing, blob=blob):
+                return (
+                    httpx.Response(200, text=listing)
+                    if "comp=list" in str(request.url)
+                    else httpx.Response(200, content=blob)
+                )
+
+            transport = httpx.MockTransport(respond)
+            link = {"containerUrl": f"https://stalairlocktre.blob.core.windows.net/{REQUEST}?sig=test"}
+            with (
+                self.subTest(error=error),
+                patch.object(export, "get_request", AsyncMock(return_value=link)),
+                patch.object(export, "AsyncClient", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs)),
+            ):
+                if error:
+                    with self.assertRaisesRegex(AssertionError, error):
+                        await export.assert_approved_copy("/endpoint", "token", True, "a.txt", expected)
+                else:
+                    await export.assert_approved_copy("/endpoint", "token", True, "a.txt", expected)

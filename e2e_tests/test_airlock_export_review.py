@@ -2,14 +2,19 @@
 
 import asyncio
 import base64
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import logging
 import math
 import os
+import re
 import time
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+from httpx import AsyncClient
 import pytest
 
 from e2e_tests import config
@@ -33,7 +38,10 @@ from e2e_tests.resources.sql_probe import COMPUTE_API, arm_client, validate_vm
 from e2e_tests.test_airlock import managed_review_vm, wait_for_review_vm_deletion
 from e2e_tests.timeouts import cleanup_deadline
 
+LOGGER = logging.getLogger(__name__)
 LIFECYCLE_SECONDS = 270 * 60
+# The tamper probe starts this long after its Run Command, so the submit comes before its first write.
+TAMPER_LEAD_SECONDS = 150
 CLEANUP_RESERVE_SECONDS = 120 * 60
 REVIEW_TEMPLATE = "tre-service-guacamole-export-reviewvm"
 VM_PAYLOAD = {
@@ -168,6 +176,21 @@ async def owned_vm(arm, resource_path, template, workspace_id, service_id, token
     return vm_id, vm["location"]
 
 
+async def assert_approved_copy(endpoint, token, verify, blob_name, expected_hash):
+    """Download the approved export with its link and compare the file list and the content."""
+    link = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"]
+    base, sas = link.split("?", 1)
+    async with AsyncClient(timeout=30) as client:
+        listing = await client.get(f"{base}?restype=container&comp=list&{sas}")
+        assert listing.status_code == 200, f"Listing the approved export failed with HTTP {listing.status_code}"
+        names = re.findall(r"<Name>([^<]+)</Name>", listing.text)
+        assert names == [blob_name], f"The approved export has other files: {names}"
+        download = await client.get(f"{base}/{blob_name}?{sas}")
+        assert download.status_code == 200, f"Reading the approved export failed with HTTP {download.status_code}"
+    assert hashlib.sha256(download.content).hexdigest() == expected_hash, "The approved export changed"
+    LOGGER.info("The approved export has the submitted file only, with the submitted content")
+
+
 @pytest.mark.asyncio(loop_scope="session")
 @pytest.mark.export_review_validation
 @pytest.mark.nexus_required
@@ -240,14 +263,46 @@ async def test_airlock_export_review_vm_flow(verify):
                 probe_id=probe_id, blob_name=f"export-{probe_id}.txt", content=f"Synthetic export review {probe_id}\n"
             )
             await run_probe(arm, seed_vm, seed_location, phase="upload", container_url=container_url, **probe)
-            submitted = await post_request(None, endpoint + "/submit", token, verify, 200)
+            expected_hash = hashlib.sha256(probe["content"].encode()).hexdigest()
+            # The submission fixes the content. Writes through the old draft SAS start just after it.
+            start_at = datetime.now(timezone.utc) + timedelta(seconds=TAMPER_LEAD_SECONDS)
+            tamper = asyncio.create_task(
+                run_probe(
+                    arm,
+                    seed_vm,
+                    seed_location,
+                    phase="tamper",
+                    container_url=container_url,
+                    start_at=start_at,
+                    **probe,
+                )
+            )
+            try:
+                await asyncio.sleep(max(0, (start_at - datetime.now(timezone.utc)).total_seconds() - 15))
+                submitted = await post_request(None, endpoint + "/submit", token, verify, 200)
+                assert datetime.now(timezone.utc) < start_at, "The submit ended after the first tamper write"
+                evidence = await tamper
+            finally:
+                if not tamper.done():
+                    tamper.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await tamper
             assert submitted["airlockRequest"]["status"] == airlock_strings.SUBMITTED_STATUS
+            LOGGER.info(
+                "Old draft SAS after submission: %d writes accepted, final attempts %s",
+                evidence["accepted_writes"],
+                evidence["final"],
+            )
+            assert all(code >= 400 for code in evidence["final"].values()), (
+                f"The old draft SAS still changes data after the handover: {evidence['final']}"
+            )
             async with asyncio.timeout(15 * 60):
                 await wait_for_status(airlock_strings.IN_REVIEW_STATUS, token, workspace_path, request_id, verify)
             async with managed_review_vm(workspace_path, request_id, token, token, verify) as review_path:
                 review_vm, review_location = await owned_vm(
                     arm, review_path, REVIEW_TEMPLATE, workspace_id, service_id, token, verify
                 )
+                # The review copy must hold the submitted content only, also if a write after the submit passed.
                 await run_probe(arm, review_vm, review_location, phase="read", **probe)
                 await post_request(
                     {"approval": True, "decisionExplanation": "Synthetic export data matched the expected hash"},
@@ -258,4 +313,5 @@ async def test_airlock_export_review_vm_flow(verify):
                 )
                 async with asyncio.timeout(15 * 60):
                     await wait_for_status(airlock_strings.APPROVED_STATUS, token, workspace_path, request_id, verify)
+                await assert_approved_copy(endpoint, token, verify, probe["blob_name"], expected_hash)
                 await wait_for_review_vm_deletion(review_path, token, verify)
