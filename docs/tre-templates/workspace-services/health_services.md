@@ -16,15 +16,16 @@ In addition, when creating this workspace service you can choose to deploy [FHIR
 ## Private network access
 
 The service connects the healthcare workspace to the workspace network through one private endpoint.
-Azure writes the private DNS records for FHIR and DICOM when it creates the DNS zone group of this endpoint.
-Azure does not always add a record for a service that an update adds later.
-The name of the DNS zone group shows the services, for example `private-dns-zone-group-fhir-dicom`.
-If an update adds or removes FHIR or DICOM, Terraform creates the DNS zone group again, and Azure writes the records again.
-The endpoint stays. While Terraform creates the group again, the private DNS records do not exist.
+Azure writes the private DNS records of a zone when the DNS zone group of this endpoint gets that zone.
+The DNS zone group always has the zone for the workspace and FHIR. It has the DICOM zone only when the service has DICOM.
+If an update adds DICOM, Terraform adds the DICOM zone to the group, and Azure writes the DICOM record. The endpoint stays.
+Azure links a new service to the endpoint some minutes after Terraform creates the service.
+During this time, Azure refuses a change to the DNS zone group with HTTP 409, and Terraform tries again.
 
-Before version 0.3.13, the DNS zone group did not change when an update added a service.
-If you added FHIR or DICOM to an existing service before this version, the new host can resolve to a public address.
-An upgrade to version 0.3.13 gives the DNS zone group a new name, so Azure writes the missing record.
+Before version 0.3.14, the endpoint resource created the DNS zone group, and the group did not change when an update added a service.
+If you added DICOM to an existing service before this version, the DICOM host can resolve to a public address.
+An upgrade to version 0.3.14 deletes the old DNS zone group and creates a new one, so Azure writes the missing record.
+Until the upgrade creates the new group, the private DNS records do not exist, and private access to the services stops.
 Do not delete the private endpoint to repair the service.
 
 The DICOM service has public network access turned off.

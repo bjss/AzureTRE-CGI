@@ -53,15 +53,6 @@ resource "azurerm_private_endpoint" "health_services_private_endpoint" {
   subnet_id           = data.azurerm_subnet.services.id
   tags                = local.workspace_service_tags
 
-  # Azure writes the private DNS records when it creates the DNS zone group. It does
-  # not always add a record for a service that joins the workspace later. The name
-  # changes with the set of services, so the provider creates the group again and
-  # the endpoint stays.
-  private_dns_zone_group {
-    name                 = join("-", concat(["private-dns-zone-group"], var.deploy_fhir ? ["fhir"] : [], var.deploy_dicom ? ["dicom"] : []))
-    private_dns_zone_ids = [data.azurerm_private_dns_zone.health.id, data.azurerm_private_dns_zone.dicom.id]
-  }
-
   private_service_connection {
     private_connection_resource_id = azurerm_healthcare_workspace.healthcare_workspace.id
     name                           = "psc-${azurerm_healthcare_workspace.healthcare_workspace.name}"
@@ -74,5 +65,47 @@ resource "azurerm_private_endpoint" "health_services_private_endpoint" {
     azurerm_healthcare_dicom_service.dicom
   ]
 
-  lifecycle { ignore_changes = [tags] }
+  # The DNS zone group is a separate resource. The provider changes a zone group in this
+  # resource only together with the whole endpoint.
+  lifecycle { ignore_changes = [tags, private_dns_zone_group] }
+}
+
+# Before version 0.3.14, the endpoint resource created the DNS zone group. This removes
+# that group once, so that the resource below can create a group with the same name.
+resource "azapi_resource_action" "remove_endpoint_dns_zone_group" {
+  type        = "Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01"
+  resource_id = "${azurerm_private_endpoint.health_services_private_endpoint.id}/privateDnsZoneGroups/private-dns-zone-group"
+  method      = "DELETE"
+
+  retry = {
+    error_message_regex = ["AnotherOperationInProgress"]
+  }
+}
+
+# Azure writes the private DNS records of a zone when the group gets that zone. Azure
+# links a new service to the endpoint after the service create returns. A change to the
+# group during this time gets HTTP 409, so the provider tries again.
+resource "azapi_resource" "health_services_dns_zone_group" {
+  type      = "Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01"
+  name      = "private-dns-zone-group"
+  parent_id = azurerm_private_endpoint.health_services_private_endpoint.id
+
+  body = {
+    properties = {
+      privateDnsZoneConfigs = concat(
+        [{ name = "health", properties = { privateDnsZoneId = data.azurerm_private_dns_zone.health.id } }],
+        var.deploy_dicom ? [{ name = "dicom", properties = { privateDnsZoneId = data.azurerm_private_dns_zone.dicom.id } }] : []
+      )
+    }
+  }
+
+  retry = {
+    error_message_regex = ["AnotherOperationInProgress"]
+  }
+
+  depends_on = [
+    azapi_resource_action.remove_endpoint_dns_zone_group,
+    azurerm_healthcare_fhir_service.fhir,
+    azurerm_healthcare_dicom_service.dicom
+  ]
 }
