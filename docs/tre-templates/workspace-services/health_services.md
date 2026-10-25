@@ -16,6 +16,7 @@ In addition, when creating this workspace service you can choose to deploy [FHIR
 ## Private network access
 
 The service connects the healthcare workspace to the workspace network through one private endpoint.
+Terraform creates the endpoint before FHIR and DICOM, and deletes FHIR and DICOM before the endpoint.
 Azure writes the private DNS records of a zone when the DNS zone group of this endpoint gets that zone.
 The DNS zone group always has the zone for the workspace and FHIR. It has the DICOM zone only when the service has DICOM.
 If an update adds DICOM, Terraform adds the DICOM zone to the group, and Azure writes the DICOM record. The endpoint stays.
