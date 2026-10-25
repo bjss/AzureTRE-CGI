@@ -17,6 +17,8 @@ from e2e_tests.timeouts import cleanup_deadline
 
 
 ARM = "https://management.azure.com"
+# Resource Manager can answer a read with a short throttle or gateway error. Only a GET is safe to send again.
+RETRY_STATUSES = (429, 500, 502, 503, 504)
 SECRETS_USER = "4633458b-17de-408a-b874-0445c86b69e6"
 COMPUTE_API = "2023-03-01"
 ROLE_API = "2022-04-01"
@@ -37,13 +39,17 @@ class ArmClient:
         params = {"api-version": api_version}
         if expand:
             params["$expand"] = "instanceView"
-        response = await self.client.request(
-            method,
-            f"{ARM}{resource_id}",
-            params=params,
-            headers={"Authorization": f"Bearer {token.token}"},
-            json=body,
-        )
+        for attempt in range(1, 4):
+            response = await self.client.request(
+                method,
+                f"{ARM}{resource_id}",
+                params=params,
+                headers={"Authorization": f"Bearer {token.token}"},
+                json=body,
+            )
+            if method != "GET" or response.status_code not in RETRY_STATUSES or attempt == 3:
+                break
+            await asyncio.sleep(10 * attempt)
         if missing_ok and response.status_code == 404:
             return None
         if response.status_code not in (200, 201, 202, 204):
