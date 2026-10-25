@@ -43,6 +43,9 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Give the Gitea shared service identity the Key Vault role only on the two secrets that its web app reads. It had the role on the whole core Key Vault. (`tre-shared-service-gitea` 1.2.7)
+* Give the Nexus VM identity the Key Vault role only on the Nexus admin password and the Nexus TLS certificate. It had the role on the whole core Key Vault. (`tre-shared-service-sonatype-nexus` 3.11.5)
+* Give the OHDSI Web API identity the Key Vault role only on the five secrets that its web app reads. It had the role on the whole workspace Key Vault. (`tre-workspace-service-ohdsi` 0.3.18)
 * Give the Gitea workspace service identity the Key Vault role only on the three secrets that its web app reads. It had the role on the whole workspace Key Vault. (`tre-workspace-service-gitea` 1.3.12)
 * Create the network rules of the Gitea storage account together with the account. A separate resource set them after the create and changed them again before the delete. An upgrade removes the separate resource from the Terraform state and keeps the rules. (`tre-workspace-service-gitea` 1.3.11)
 * Create the network rules of the workspace storage account and the Airlock export in-progress storage account together with each account. A separate resource set them after the create and changed them again before the delete. An upgrade removes the separate resource from the Terraform state and keeps the rules. (`tre-workspace-base` 2.12.11, `tre-workspace-unrestricted` 0.15.10, `tre-workspace-airlock-import-review` 0.18.10)
