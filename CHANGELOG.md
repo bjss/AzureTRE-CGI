@@ -30,6 +30,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 
 BUG FIXES:
 * Give the Gitea shared service identity the Key Vault role only on the two secrets that its web app reads. It had the role on the whole core Key Vault. (`tre-shared-service-gitea` 1.2.6)
+* Give the Nexus VM identity the Key Vault role only on the Nexus admin password and the Nexus TLS certificate. It had the role on the whole core Key Vault. (`tre-shared-service-sonatype-nexus` 3.11.3)
 * Update `vite` from 7.3.6 to 7.3.7 and the UI Vitest packages from 4.1.11 to 4.1.12 to address security advisories in the development server and the test mocker. (`ui` 0.10.4) ([#5274](https://github.com/microsoft/AzureTRE/pull/5274))
 * Update `aiohttp` from 3.14.3 to 3.14.4 in `api_app`, `resource_processor`, and the CLI to address security advisories. (`API` 0.28.7, `resource_processor` 0.13.15, `CLI` 0.2.13) ([#5270](https://github.com/microsoft/AzureTRE/pull/5270))
 * Rename a test variable in the E2E polling tests so that CodeQL stops reporting false clear-text logging alerts. ([#5266](https://github.com/microsoft/AzureTRE/pull/5266))
