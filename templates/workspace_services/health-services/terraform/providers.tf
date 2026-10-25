@@ -5,9 +5,10 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "= 4.58.0"
     }
+    # Versions before 2.9.0 fail each update when Terraform is earlier than 1.12.
     azapi = {
       source  = "Azure/azapi"
-      version = "= 2.8.0"
+      version = "= 2.9.0"
     }
   }
 
