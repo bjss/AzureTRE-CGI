@@ -31,6 +31,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Give the Gitea workspace service identity the Key Vault role only on the three secrets that its web app reads. It had the role on the whole workspace Key Vault. (`tre-workspace-service-gitea` 1.3.11)
 * Disable public network access on the MySQL flexible server, so that clients can connect only through the private endpoint. Move the MySQL bundle to azurerm 4.27.0, which has this setting. An upgrade changes the setting in place. (`tre-workspace-service-mysql` 1.0.16) ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
 * Create the Gitea workspace service file share through Resource Manager. Terraform used the file endpoint of the storage account, which the TRE firewall blocks until the private endpoint and its DNS record exist. So an install could fail, and after a delete removed the private endpoint, each later update or delete failed.
   Also disable public network access on the Gitea MySQL server. An upgrade keeps the existing share and changes the server setting in place. (`tre-workspace-service-gitea` 1.3.8) ([#5141](https://github.com/microsoft/AzureTRE/issues/5141))
