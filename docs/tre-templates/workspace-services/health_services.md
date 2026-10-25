@@ -16,13 +16,16 @@ In addition, when creating this workspace service you can choose to deploy [FHIR
 ## Private network access
 
 The service connects the healthcare workspace to the workspace network through one private endpoint.
-Azure writes the private DNS records for FHIR and DICOM when it creates this endpoint.
-If an update adds or removes FHIR or DICOM, Terraform replaces the endpoint, so that each service gets a private DNS record.
-During this replacement, private access to the services stops for some minutes.
+Azure writes the private DNS records for FHIR and DICOM when it creates the DNS zone group of this endpoint.
+Azure does not always add a record for a service that an update adds later.
+The name of the DNS zone group shows the services, for example `private-dns-zone-group-fhir-dicom`.
+If an update adds or removes FHIR or DICOM, Terraform creates the DNS zone group again, and Azure writes the records again.
+The endpoint stays. While Terraform creates the group again, the private DNS records do not exist.
 
-Before version 0.3.9, an update did not replace the endpoint.
+Before version 0.3.13, the DNS zone group did not change when an update added a service.
 If you added FHIR or DICOM to an existing service before this version, the new host can resolve to a public address.
-To repair the service, delete its private endpoint `pe-hs<suffix>` in Azure, then upgrade the service. Terraform then creates the endpoint again.
+An upgrade to version 0.3.13 gives the DNS zone group a new name, so Azure writes the missing record.
+Do not delete the private endpoint to repair the service.
 
 The DICOM service has public network access turned off.
 Before version 0.3.10, Terraform created the DICOM service with public network access on.

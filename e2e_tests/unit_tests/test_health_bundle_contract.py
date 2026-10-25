@@ -12,14 +12,16 @@ def block(source, header):
 
 
 class HealthBundleContractTests(unittest.TestCase):
-    def test_endpoint_is_replaced_when_the_services_change(self):
+    def test_dns_zone_group_name_follows_the_services(self):
         # Azure does not always add a DNS record for a service that joins after the endpoint.
+        # A new group name makes the provider create the group again, and the endpoint stays.
         source = (BUNDLE / "main.tf").read_text()
-        services = block(source, 'resource "terraform_data" "private_endpoint_services"')
-        self.assertRegex(services, r"\n    fhir\s*=\s*var\.deploy_fhir\n")
-        self.assertRegex(services, r"\n    dicom\s*=\s*var\.deploy_dicom\n")
         endpoint = block(source, 'resource "azurerm_private_endpoint" "health_services_private_endpoint"')
-        self.assertRegex(endpoint, r"replace_triggered_by\s*=\s*\[terraform_data\.private_endpoint_services\]")
+        group = block(endpoint, "  private_dns_zone_group")
+        name = next(line for line in group.splitlines() if line.strip().startswith("name"))
+        self.assertIn('var.deploy_fhir ? ["fhir"] : []', name)
+        self.assertIn('var.deploy_dicom ? ["dicom"] : []', name)
+        self.assertNotIn("replace_triggered_by", endpoint)
 
     def test_dicom_public_network_access_is_off(self):
         # The provider turns it on unless the bundle sets it.
