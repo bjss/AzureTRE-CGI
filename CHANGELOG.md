@@ -31,6 +31,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Give the OHDSI Web API identity the Key Vault role only on the five secrets that its web app reads. It had the role on the whole workspace Key Vault. (`tre-workspace-service-ohdsi` 0.3.15)
 * Fix OHDSI database credentials, bound WebAPI startup checks, disable public access and remove owned firewall rules on uninstall. (`tre-workspace-service-ohdsi` 0.3.14) ([#5149](https://github.com/microsoft/AzureTRE/issues/5149))
 * Upload the OHDSI Atlas UI config with the storage account key, as the share and its web app mount already do. Since azurerm 4, the upload used Azure AD and failed with HTTP 403, because the resource processor has no file data role. (`tre-workspace-service-ohdsi` 0.3.14)
 * Create the OHDSI Atlas UI web app after the PostgreSQL server, and the WebAPI web app after the Atlas UI web app. Azure rejected the web app subnet link with ReferencedResourceNotProvisioned while a PostgreSQL subnet write ran in the same VNet. (`tre-workspace-service-ohdsi` 0.3.14)
