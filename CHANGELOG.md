@@ -43,6 +43,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
+* Send an E2E Resource Manager read again, up to three times, after HTTP 429 or a 5xx answer. A Linux VM test failed on one HTTP 504 answer after its `reset_password` action had passed.
 * Give the Gitea shared service identity the Key Vault role only on the two secrets that its web app reads. It had the role on the whole core Key Vault. (`tre-shared-service-gitea` 1.2.7)
 * Give the Nexus VM identity the Key Vault role only on the Nexus admin password and the Nexus TLS certificate. It had the role on the whole core Key Vault. (`tre-shared-service-sonatype-nexus` 3.11.5)
 * Give the OHDSI Web API identity the Key Vault role only on the five secrets that its web app reads. It had the role on the whole workspace Key Vault. (`tre-workspace-service-ohdsi` 0.3.18)
