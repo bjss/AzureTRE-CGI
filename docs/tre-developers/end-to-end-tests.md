@@ -391,9 +391,9 @@ Resource Processor versions before 0.13.10 keep the parameters of each resource 
 
 1. Deploy the earlier release, for example `v0.29.1`, and set `e2eTestsCustomSelector` to `porter_upgrade_seed`. The case creates the workspace `E2E Porter upgrade seed` with a Guacamole service and two Windows VMs. It disables the second VM and keeps all the resources.
 1. Deploy the current code to the same environment, and set `e2eTestsCustomSelector` to `porter_upgrade_verify`.
-1. The `stop` action on the first VM must fail with the upgrade-required message, and the VM must keep running. The delete of the second VM must fail with the same message, and the VM must still exist.
+1. The `stop` action on the first VM must fail with the upgrade-required message. The delete of the second VM must fail with the same message, and the VM must still exist in Azure.
 1. The case upgrades each VM with a `PATCH` of its current template version.
-1. The `stop` and `start` actions must pass, and Azure must show the new power state. The delete of the second VM must pass.
+1. The `stop` and `start` actions must pass. The delete of the second VM must pass, and the VM must not exist in Azure.
 1. The case disables and deletes the workspace. The disable upgrades each child resource, so the delete must pass.
 
 ### Run the branch workflow before merge

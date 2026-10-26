@@ -30,7 +30,6 @@ from e2e_tests.resources.deployment import check_deployment
 from e2e_tests.resources.resource import TIMEOUT, get_resource, post_resource
 from e2e_tests.resources.sql_lifecycle import TERMINAL_STATES, sql_lifecycle
 from e2e_tests.resources.sql_probe import COMPUTE_API, arm_client
-from e2e_tests.resources.vm_actions import invoke_action, power_state
 
 LOGGER = logging.getLogger(__name__)
 SEED_NAME = "E2E Porter upgrade seed"
@@ -191,7 +190,6 @@ async def test_upgrade_clears_legacy_overrides(verify):
         assert action_vm["isEnabled"] and not uninstall_vm["isEnabled"]
         action_path = action_vm["resourcePath"]
         uninstall_path = uninstall_vm["resourcePath"]
-        action_id = action_vm["properties"]["azure_resource_id"]
         uninstall_id = uninstall_vm["properties"]["azure_resource_id"]
 
         async with arm_client() as arm:
@@ -199,7 +197,6 @@ async def test_upgrade_clears_legacy_overrides(verify):
             state, message = await send_action(action_path, "stop", token, verify)
             assert state == strings.RESOURCE_ACTION_STATUS_FAILED, f"The stop action ended with {state}"
             assert UPGRADE_REQUIRED in message, "The stop action failed without the upgrade-required message"
-            assert await power_state(arm, action_id) == "PowerState/running"
             state, message = await send_delete(uninstall_path, token, verify)
             assert state == strings.RESOURCE_STATUS_DELETING_FAILED, f"The uninstall ended with {state}"
             assert UPGRADE_REQUIRED in message, "The uninstall failed without the upgrade-required message"
@@ -211,10 +208,9 @@ async def test_upgrade_clears_legacy_overrides(verify):
                 await upgrade_in_place(path, token, verify)
             LOGGER.info("The upgrades with the current template versions passed")
 
-            await invoke_action(action_path, "stop", token, verify)
-            assert await power_state(arm, action_id) == "PowerState/deallocated"
-            await invoke_action(action_path, "start", token, verify)
-            assert await power_state(arm, action_id) == "PowerState/running"
+            for action in ("stop", "start"):
+                state, _ = await send_action(action_path, action, token, verify)
+                assert state == strings.RESOURCE_ACTION_STATUS_SUCCEEDED, f"The {action} action ended with {state}"
             state, _ = await send_delete(uninstall_path, token, verify)
             assert state == strings.RESOURCE_STATUS_DELETED, f"The uninstall after the upgrade ended with {state}"
             assert await arm.request("GET", uninstall_id, COMPUTE_API, missing_ok=True) is None

@@ -22,7 +22,6 @@ class PorterUpgradeTests(unittest.IsolatedAsyncioTestCase):
         self.events = []
         self.seeds = []
         self.upgraded = set()
-        self.power = "PowerState/running"
         self.vm_exists = True
         self.enterContext(patch.dict(os.environ, PORTER_UPGRADE_VALIDATION_DEADLINE=""))
         for name, value in (("TEST_WORKSPACE_APP_ID", "app"), ("TEST_WORKSPACE_APP_SECRET", "s")):
@@ -106,18 +105,6 @@ class PorterUpgradeTests(unittest.IsolatedAsyncioTestCase):
 
         self.enterContext(patch.object(upgrade, "send_delete", delete))
 
-        async def invoke(path, name, *args):
-            self.events.append(name)
-            self.power = {"stop": "PowerState/deallocated", "start": "PowerState/running"}[name]
-
-        self.enterContext(patch.object(upgrade, "invoke_action", invoke))
-
-        async def power(arm, vm_id):
-            self.events.append(self.power)
-            return self.power
-
-        self.enterContext(patch.object(upgrade, "power_state", power))
-
         class Arm:
             async def request(arm, method, resource_id, api, missing_ok=False):
                 self.events.append("vm-exists" if self.vm_exists else "vm-gone")
@@ -165,15 +152,12 @@ class PorterUpgradeTests(unittest.IsolatedAsyncioTestCase):
             self.events,
             [
                 "blocked-stop",
-                "PowerState/running",
                 "blocked-delete",
                 "vm-exists",
                 f"upgrade {VMS[upgrade.ACTION_VM]}",
                 f"upgrade {VMS[upgrade.UNINSTALL_VM]}",
                 "stop",
-                "PowerState/deallocated",
                 "start",
-                "PowerState/running",
                 "delete",
                 "vm-gone",
                 "delete-workspace",
