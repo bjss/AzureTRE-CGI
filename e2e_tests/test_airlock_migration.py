@@ -2,10 +2,12 @@
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import os
 from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 from httpx import AsyncClient
 import pytest
@@ -13,13 +15,23 @@ import pytest
 from e2e_tests import config
 from e2e_tests.airlock import strings as airlock_strings
 from e2e_tests.airlock.request import get_request, post_request, wait_for_status
-from e2e_tests.conftest import clean_up_test_workspace, create_or_get_test_workspace, get_workspace_owner_token
+from e2e_tests.conftest import (
+    clean_up_test_workspace,
+    clean_up_test_workspace_service,
+    create_or_get_test_workpace_service,
+    create_or_get_test_workspace,
+    get_workspace_owner_token,
+)
 from e2e_tests.helpers import get_admin_token, get_auth_header, get_full_endpoint
+from e2e_tests.resources import strings
+from e2e_tests.resources.airlock_probe import run_probe
+from e2e_tests.resources.nexus import nexus_prerequisites
 from e2e_tests.resources.resource import get_resource, post_resource
 from e2e_tests.resources.sql_lifecycle import sql_lifecycle
 from e2e_tests.resources.sql_probe import arm_client
 from e2e_tests.token_provider import TokenProvider
 from e2e_tests.test_airlock import create_draft_import_request_with_file, submit_airlock_import_request
+from e2e_tests.test_airlock_export_review import VM_PAYLOAD, assert_approved_copy, owned_vm
 
 LOGGER = logging.getLogger(__name__)
 STORAGE_API = "2023-05-01"
@@ -60,6 +72,50 @@ async def legacy_accounts(workspace_id):
     return found
 
 
+async def approve_legacy_export(arm, vm_id, location, workspace_path, workspace_id, token, verify):
+    """Upload an export from the workspace VM to the legacy internal account, then approve it."""
+    result = await post_request(
+        {"type": airlock_strings.EXPORT, "businessJustification": "Legacy export before the move to v2"},
+        f"/api{workspace_path}/requests",
+        token,
+        verify,
+        201,
+    )
+    request_id = str(UUID(result["airlockRequest"]["id"]))
+    endpoint = f"/api{workspace_path}/requests/{request_id}"
+    container_url = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"]
+    # Do not put the URL in the error: it contains a SAS token.
+    if storage_account(container_url) != f"stalexintws{workspace_id[-4:]}" or urlsplit(container_url).path != (
+        f"/{request_id}"
+    ):
+        raise ValueError("Unexpected legacy export draft storage or container")
+    probe_id = uuid4().hex
+    probe = dict(probe_id=probe_id, blob_name=f"export-{probe_id}.txt", content=f"Legacy export {probe_id}\n")
+    await run_probe(arm, vm_id, location, phase="upload", container_url=container_url, **probe)
+    await post_request(None, endpoint + "/submit", token, verify, 200)
+    async with asyncio.timeout(15 * 60):
+        await wait_for_status(airlock_strings.IN_REVIEW_STATUS, token, workspace_path, request_id, verify)
+    await post_request(
+        {"approval": "True", "decisionExplanation": "Legacy export before the move to v2"},
+        endpoint + "/review",
+        token,
+        verify,
+        200,
+    )
+    async with asyncio.timeout(15 * 60):
+        await wait_for_status(airlock_strings.APPROVED_STATUS, token, workspace_path, request_id, verify)
+    return request_id, probe["blob_name"], hashlib.sha256(probe["content"].encode()).hexdigest()
+
+
+async def assert_legacy_export(workspace_path, export, token, verify):
+    """The approved legacy export is in the core account and holds the submitted file only."""
+    request_id, blob_name, expected_hash = export
+    endpoint = f"/api{workspace_path}/requests/{request_id}"
+    link = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"]
+    assert storage_account(link) == f"stalexapp{config.TRE_ID.replace('-', '')}"
+    await assert_approved_copy(endpoint, token, verify, blob_name, expected_hash)
+
+
 async def patch_status(workspace_path, properties, token, verify):
     """Send a workspace PATCH and return its HTTP status, without waiting for an operation."""
     workspace = (await get_resource(f"/api{workspace_path}", token, verify))["workspace"]
@@ -73,6 +129,7 @@ async def patch_status(workspace_path, properties, token, verify):
 
 @pytest.mark.asyncio(loop_scope="session")
 @pytest.mark.airlock_migration_validation
+@pytest.mark.nexus_required
 @pytest.mark.timeout(285 * 60)
 async def test_legacy_airlock_workspace_moves_to_v2(verify):
     if os.environ.get("AZURE_ENVIRONMENT", "AzureCloud") != "AzureCloud":
@@ -95,6 +152,13 @@ async def test_legacy_airlock_workspace_moves_to_v2(verify):
         workspace = (await get_resource(f"/api{workspace_path}", token, verify))["workspace"]
         assert workspace["properties"]["airlock_version"] == 1
 
+        # A Windows VM in the workspace writes the legacy export. Its template reads the Nexus address.
+        async with asyncio.timeout(60 * 60):
+            await resources.enter("Nexus prerequisites", nexus_prerequisites(verify))
+        service_path, service_id = await create_or_get_test_workpace_service(workspace_path, token, "", verify)
+        resources.own(service_path, clean_up_test_workspace_service, "", service_path, workspace_id, verify)
+        vm_path, _ = await resources.create(VM_PAYLOAD, f"/api{service_path}/user-resources", token)
+
         # Legacy behaviour: an import uses the legacy external account and completes.
         legacy_id, legacy_url = await submit_airlock_import_request(workspace_path, token, verify)
         assert storage_account(legacy_url) == f"stalimex{tre}"
@@ -107,6 +171,15 @@ async def test_legacy_airlock_workspace_moves_to_v2(verify):
         )
         await wait_for_status(airlock_strings.APPROVED_STATUS, token, workspace_path, legacy_id, verify)
         LOGGER.info("A legacy import passed in the v1 workspace")
+
+        # Legacy behaviour: an export from the workspace VM goes through the legacy accounts to the core account.
+        async with arm_client() as arm:
+            vm_id, location = await owned_vm(
+                arm, vm_path, strings.GUACAMOLE_WINDOWS_USER_RESOURCE, workspace_id, service_id, token, verify
+            )
+            export = await approve_legacy_export(arm, vm_id, location, workspace_path, workspace_id, token, verify)
+        await assert_legacy_export(workspace_path, export, token, verify)
+        LOGGER.info("A legacy export passed in the v1 workspace")
 
         # The migration stamps pre-v2 workspaces. A second call must change nothing.
         for attempt in (1, 2):
@@ -154,6 +227,14 @@ async def test_legacy_airlock_workspace_moves_to_v2(verify):
         legacy = (await get_request(f"/api{workspace_path}/requests/{legacy_id}", token, verify, 200))["airlockRequest"]
         assert legacy["status"] == airlock_strings.APPROVED_STATUS
         assert legacy["airlock_version"] == 1
+        exported = (await get_request(f"/api{workspace_path}/requests/{export[0]}", token, verify, 200))[
+            "airlockRequest"
+        ]
+        assert exported["status"] == airlock_strings.APPROVED_STATUS
+        assert exported["airlock_version"] == 1
+        # The approved export is in the core account, so the move of the workspace keeps it.
+        await assert_legacy_export(workspace_path, export, token, verify)
+        LOGGER.info("The approved legacy export is still available after the move")
         after = await legacy_accounts(workspace_id)
         LOGGER.info("Legacy workspace accounts after the move: %s", after)
         assert after == dict.fromkeys(LEGACY_ACCOUNTS)
