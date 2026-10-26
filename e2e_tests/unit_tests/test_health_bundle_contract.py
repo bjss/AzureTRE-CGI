@@ -59,6 +59,16 @@ class HealthBundleContractTests(unittest.TestCase):
         if version(terraform) < (1, 12):
             self.assertGreaterEqual(version(azapi), (2, 9, 0))
 
+    def test_azurerm_keeps_a_new_fhir_service_in_the_state(self):
+        # Before 5.3.0, azurerm waits for Succeeded after the FHIR create and saves the ID after this
+        # wait. If Azure reports Accepted, the create fails, and the state does not get the service.
+        providers = (BUNDLE / "providers.tf").read_text()
+        lock = (BUNDLE / ".terraform.lock.hcl").read_text()
+        azurerm = re.search(r'source\s*=\s*"hashicorp/azurerm"\s*\n\s*version\s*=\s*"=\s*([\d.]+)"', providers).group(1)
+        locked = re.search(r'"registry.terraform.io/hashicorp/azurerm" \{\s*version\s*=\s*"([\d.]+)"', lock).group(1)
+        self.assertGreaterEqual(version(azurerm), (5, 3, 0))
+        self.assertEqual(locked, azurerm)
+
     def test_dicom_public_network_access_is_off(self):
         # The provider turns it on unless the bundle sets it.
         source = (BUNDLE / "main.tf").read_text()

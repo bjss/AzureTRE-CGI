@@ -1,9 +1,10 @@
 # Azure Provider source and version being used
 terraform {
   required_providers {
+    # Before 5.3.0, a FHIR create that Azure reports as Accepted fails, and the state does not get the service.
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "= 4.58.0"
+      version = "= 5.11.0"
     }
     # Versions before 2.9.0 fail each update when Terraform is earlier than 1.12.
     azapi = {
@@ -16,6 +17,8 @@ terraform {
 }
 
 provider "azurerm" {
+  # Version 5 registers no resource providers by default. Keep the registrations of version 4.
+  resource_provider_registrations = "legacy"
   features {
     key_vault {
       # Don't purge on destroy (this would fail due to purge protection being enabled on keyvault)

@@ -38,6 +38,13 @@ A request from outside the workspace network gets HTTP 403.
 The FHIR service reports `publicNetworkAccess` `Enabled`, but Azure does not use this value when the workspace has an approved private endpoint.
 Azure also keeps this value when a request sets it to `Disabled`.
 
+## Install failures before version 0.3.18
+
+Before version 0.3.18, an install can fail after Azure creates the FHIR service.
+If Azure reports the FHIR service as `Accepted` after the create, the azurerm provider stops its wait, and Terraform does not save the FHIR service.
+After this failure, each update and each delete of the Health service fails.
+To repair the service, delete its FHIR service in the Azure portal, and then delete the Health service again.
+
 ## Authentication
 
 Learn more about authentication and application roles in [this doc](https://learn.microsoft.com/en-us/azure/healthcare-apis/authentication-authorization). Make sure to assign your users/apps with the required role and follow the guidelines to retrieve a token.
