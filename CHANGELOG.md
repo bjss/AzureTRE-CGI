@@ -31,6 +31,7 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 
 BUG FIXES:
 * Accept traffic to the core storage account only through its private endpoints and from trusted Azure services. Add private endpoints for the queue and table services, which the Airlock notifier Logic App uses. The Logic App reaches its content share through the virtual network, and Nexus keeps its boot diagnostics in managed storage.
+  The notifier uses the AzureRM provider 4.57.0, which updates the Logic App in one request with all its app settings.
   (`core` 0.18.16, `tre-shared-service-airlock-notifier` 1.0.15, `tre-shared-service-sonatype-nexus` 3.11.3)
 * Update `vite` from 7.3.6 to 7.3.7 and the UI Vitest packages from 4.1.11 to 4.1.12 to address security advisories in the development server and the test mocker. (`ui` 0.10.4) ([#5274](https://github.com/microsoft/AzureTRE/pull/5274))
 * Update `aiohttp` from 3.14.3 to 3.14.4 in `api_app`, `resource_processor`, and the CLI to address security advisories. (`API` 0.28.7, `resource_processor` 0.13.15, `CLI` 0.2.13) ([#5270](https://github.com/microsoft/AzureTRE/pull/5270))
