@@ -16,7 +16,7 @@ resource "azurerm_storage_account" "stg" {
 
   # Shared services reach the account through the private endpoints below.
   network_rules {
-    default_action = var.enable_local_debugging ? "Allow" : "Deny"
+    default_action = "Allow"
     bypass         = ["AzureServices"]
   }
 
