@@ -4,7 +4,7 @@
 * Existing resources with legacy Porter parameter overrides must complete a resource upgrade before custom actions or uninstall. The current template version can be reused. See [upgrading resources](docs/tre-admins/upgrading-resources.md#upgrade-existing-resources-for-document-based-porter-parameters). (`resource_processor` 0.13.10) ([#4904](https://github.com/microsoft/AzureTRE/pull/4904))
 * Set `enable_legacy_airlock` explicitly to `true` in your `config.yaml`. It currently defaults to `true` but will default to `false` in a future release;
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
-* If the Airlock notifier shared service is installed, upgrade it to 1.0.15 directly after the upgrade to `core` 0.18.18. Earlier notifier versions cannot reach the core storage account, so they stop sending notifications until the upgrade. See [Airlock notifier](docs/tre-templates/shared-services/airlock-notifier.md#storage-and-network).
+* If the Airlock notifier shared service is installed, upgrade it to 1.0.16 directly after the upgrade to `core` 0.18.18. Earlier notifier versions cannot reach the core storage account, so they stop sending notifications until the upgrade. See [Airlock notifier](docs/tre-templates/shared-services/airlock-notifier.md#storage-and-network).
 
 ENHANCEMENTS:
 * Add a `Request-Id` header with the trace ID to each API response, also to an HTTP 500. The E2E operation poll already logs this header, so a failed poll can be found in App Insights. (`api` 0.28.8) ([#5202](https://github.com/microsoft/AzureTRE/issues/5202))
@@ -48,7 +48,8 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 
 BUG FIXES:
 * Accept traffic to the core storage account only through its private endpoints and from trusted Azure services. Add private endpoints for the queue and table services, which the Airlock notifier Logic App uses. The Logic App reaches its content share through the virtual network, and Nexus keeps its boot diagnostics in managed storage.
-  (`core` 0.18.18, `tre-shared-service-airlock-notifier` 1.0.15, `tre-shared-service-sonatype-nexus` 3.11.6)
+  The notifier uses the AzureRM provider 4.57.0, which updates the Logic App in one request with all its app settings.
+  (`core` 0.18.18, `tre-shared-service-airlock-notifier` 1.0.16, `tre-shared-service-sonatype-nexus` 3.11.6)
 * Send the first step message of a request again if the API stops after it writes the operation and before it sends the message. The API keeps a `pendingDispatch` entry in the operation until the send, and the deployment status updater handles older entries every 5 minutes. A request with sensitive values fails with a clear message, because the API does not store these values.
   (`api` 0.28.9) ([#5236](https://github.com/microsoft/AzureTRE/issues/5236))
 * Send an E2E Resource Manager read again, up to three times, after HTTP 429 or a 5xx answer. A Linux VM test failed on one HTTP 504 answer after its `reset_password` action had passed.
