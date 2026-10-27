@@ -4,7 +4,8 @@
 * Existing resources with legacy Porter parameter overrides must complete a resource upgrade before custom actions or uninstall. The current template version can be reused. See [upgrading resources](docs/tre-admins/upgrading-resources.md#upgrade-existing-resources-for-document-based-porter-parameters). (`resource_processor` 0.13.10) ([#4904](https://github.com/microsoft/AzureTRE/pull/4904))
 * Set `enable_legacy_airlock` explicitly to `true` in your `config.yaml`. It currently defaults to `true` but will default to `false` in a future release;
 Setting to `false` will delete existing airlock storage accounts and must only be done once all workspaces use the v2 airlock. ([#5048](https://github.com/microsoft/AzureTRE/pull/5048))
-* If the Airlock notifier shared service is installed, upgrade it to 1.0.15 directly after the upgrade to `core` 0.18.16. Earlier notifier versions cannot reach the core storage account, so they stop sending notifications until the upgrade. See [Airlock notifier](docs/tre-templates/shared-services/airlock-notifier.md#storage-and-network).
+* If the Airlock notifier shared service is installed, upgrade it to 1.0.15 directly after the upgrade to `core` 0.18.16. Azure mounts the content share of earlier notifier versions over the public network, which the core storage account no longer accepts.
+  A running notifier can continue to work, but a restart or a configuration change of its Logic App can fail until the upgrade. See [Airlock notifier](docs/tre-templates/shared-services/airlock-notifier.md#storage-and-network).
 
 ENHANCEMENTS:
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
