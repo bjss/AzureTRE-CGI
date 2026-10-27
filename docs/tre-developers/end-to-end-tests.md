@@ -396,6 +396,16 @@ Resource Processor versions before 0.13.10 keep the parameters of each resource 
 1. The `stop` and `start` actions must pass. The delete of the second VM must pass, and the VM must not exist in Azure.
 1. The case disables and deletes the workspace. The disable upgrades each child resource, so the delete must pass.
 
+### Private core storage
+
+The core storage account `stg<tre_id>` accepts traffic only through its private endpoints. The cases in `test_core_storage_network.py` make sure that its users still work:
+
+- `core_storage_validation` reads the network rules of the account and the four private endpoints for blob, file, queue and table. It installs a shared Gitea service and makes sure that the web app runs and resolves its Key Vault references. It installs an Airlock notifier and makes sure that the Logic App runtime lists its workflow.
+- `airlock_notifier_seed` installs an Airlock notifier and keeps it. Run it before the core change.
+- `airlock_notifier_upgrade` upgrades the seed notifier after the core change to the current template version. Then the Logic App runtime must list its workflow. At the end, the case deletes the notifier.
+
+To test the upgrade of an existing notifier, run `airlock_notifier_seed` on the earlier code. Then deploy the current code and set `e2eTestsCustomSelector` to `airlock_notifier_upgrade or core_storage_validation` with `e2eProcesses` set to `1`.
+
 ### Run the branch workflow before merge
 
 1. Push the reviewed changes to a branch in `microsoft/AzureTRE`.
