@@ -1,0 +1,4 @@
+This file starts a CI environment for an attended test of scripts/ci-env claim --wait.
+The PR comment bot treats a PR that changes only Markdown files as docs only.
+A text file makes /test deploy the TRE.
+Do not merge this PR. Close it when the test is complete.
