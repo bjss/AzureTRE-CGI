@@ -60,6 +60,20 @@ check_blob_access() (
       if [[ "$operation" == release ]] && grep -Fq 'LeaseNotPresentWithLeaseOperation' <<< "$output"; then
         return 0
       fi
+      # Azure can answer this after it denied the acquire during role propagation.
+      # Only a probe without an active lease is safe to delete. Any other lease state stops the check.
+      if [[ "$operation" == release ]] && grep -Fq 'LeaseIdMismatchWithLeaseOperation' <<< "$output"; then
+        local lease_state
+        if lease_state=$(probe_lease_state); then
+          echo "Readiness probe lease state after the lease ID mismatch: ${lease_state}" >&2
+          if [[ "$lease_state" == available || "$lease_state" == expired || "$lease_state" == broken ]]; then
+            return 0
+          fi
+        else
+          # A denied read makes the release retryable below. The release uses only the probe's own lease ID.
+          output+=$'\n'"Readiness probe lease state read failed:"$'\n'"${lease_state}"
+        fi
+      fi
       if [[ "$operation" == delete ]] && grep -Fq 'BlobNotFound' <<< "$output"; then
         return 0
       fi
@@ -69,6 +83,15 @@ check_blob_access() (
       return 1
     fi
     return 2
+  }
+
+  # Print the lease state of the probe, or the error of the read.
+  probe_lease_state() {
+    az storage blob show \
+      --account-name "$TF_VAR_mgmt_storage_account_name" \
+      --container-name "$TF_VAR_terraform_state_container_name" \
+      --name "$probe_name" --auth-mode login --only-show-errors \
+      --query properties.lease.state --output tsv 2>&1
   }
 
   release_probe_lease() {

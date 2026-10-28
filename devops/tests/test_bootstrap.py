@@ -212,6 +212,9 @@ elif command == "az":
             finish(99, "Probe did not use Entra authentication")
         if not state["public"]:
             finish(1, "AuthorizationFailure")
+        if operation == "show" and "--lease-id" not in args:
+            # The probe clean-up reads the lease state after a lease ID mismatch.
+            operation = "lease_state"
         index = state["probe_calls"].get(operation, 0)
         state["probe_calls"][operation] = index + 1
         responses = config.get(f"{operation}_responses", [{"code": 0, "output": ""}])
@@ -234,6 +237,13 @@ elif command == "az":
             if args[args.index("--lease-duration") + 1] != "60":
                 finish(99, "Probe lease is not finite")
             state["probes"][name]["lease"] = args[args.index("--proposed-lease-id") + 1]
+        elif operation == "lease_state":
+            if "--query" not in args or args[args.index("--query") + 1] != "properties.lease.state":
+                finish(99, "Probe lease state read used another query")
+            if "--output" not in args or args[args.index("--output") + 1] != "tsv":
+                finish(99, "Probe lease state read used another output format")
+            lease_state = config.get("probe_lease_state") or ("leased" if state["probes"][name]["lease"] else "available")
+            finish(output=lease_state)
         elif operation in ("metadata_update", "show"):
             if state["probes"][name]["lease"] != args[args.index("--lease-id") + 1]:
                 finish(1, "LeaseIdMismatchWithBlobOperation")
@@ -582,6 +592,74 @@ class BlobReadinessChecks:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(error, self.output)
         self.assertEqual(len(self.commands("az", "storage", "blob", "lease", "release")), 1)
+        self.assertEqual(self.commands("az", "storage", "blob", "lease", "break"), [])
+        self.assertEqual(self.commands("az", "storage", "blob", "delete"), [])
+        self.assertEqual(self.commands("terraform"), [])
+        self.assertEqual(self.sleeps(), [])
+
+    def test_lease_mismatch_after_denied_acquire_cleans_up_before_retry(self):
+        # A run on 2026-10-28 got this pair while the blob role propagated.
+        result = self.run_readiness(
+            lease_acquire_responses=[
+                {"code": 1, "output": CLI_PERMISSION_ERROR},
+                {"code": 0, "output": ""},
+            ],
+            lease_release_responses=[
+                {"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"},
+                {"code": 0, "output": ""},
+            ],
+        )
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertIn("lease state after the lease ID mismatch: available", self.output)
+        self.assertEqual(self.commands("az", "storage", "blob", "lease", "break"), [])
+        self.assertEqual(len(self.commands("az", "storage", "blob", "delete")), 2)
+        self.assertEqual(self.sleeps(), [10])
+        self.assertEqual(self.probe_state(), {})
+
+    def test_lease_mismatch_with_a_denied_lease_state_read_retries_the_release(self):
+        # Azure can also deny the read while the blob role propagates.
+        result = self.run_readiness(
+            lease_acquire_responses=[
+                {"code": 1, "output": CLI_PERMISSION_ERROR},
+                {"code": 0, "output": ""},
+            ],
+            lease_release_responses=[
+                {"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"},
+                {"code": 0, "output": ""},
+            ],
+            lease_state_responses=[
+                {"code": 1, "output": CLI_PERMISSION_ERROR},
+                {"code": 0, "output": ""},
+            ],
+        )
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertIn("lease state read failed", self.output)
+        self.assertEqual(self.commands("az", "storage", "blob", "lease", "break"), [])
+        self.assertEqual(len(self.commands("az", "storage", "blob", "lease", "release")), 3)
+        self.assertEqual(self.sleeps(), [10, 10])
+        self.assertEqual(self.probe_state(), {})
+
+    def test_lease_mismatch_with_a_failed_lease_state_read_stops(self):
+        result = self.run_readiness(
+            lease_acquire_responses=[{"code": 1, "output": CLI_PERMISSION_ERROR}],
+            lease_release_responses=[{"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"}],
+            lease_state_responses=[{"code": 1, "output": "ERROR: The specified blob does not exist."}],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("The specified blob does not exist.", self.output)
+        self.assertEqual(self.commands("az", "storage", "blob", "lease", "break"), [])
+        self.assertEqual(self.commands("az", "storage", "blob", "delete"), [])
+        self.assertEqual(self.commands("terraform"), [])
+        self.assertEqual(self.sleeps(), [])
+
+    def test_lease_mismatch_with_an_unknown_lease_state_stops(self):
+        result = self.run_readiness(
+            lease_acquire_responses=[{"code": 1, "output": CLI_PERMISSION_ERROR}],
+            lease_release_responses=[{"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"}],
+            probe_lease_state="breaking",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("lease state after the lease ID mismatch: breaking", self.output)
         self.assertEqual(self.commands("az", "storage", "blob", "delete"), [])
         self.assertEqual(self.commands("terraform"), [])
         self.assertEqual(self.sleeps(), [])
