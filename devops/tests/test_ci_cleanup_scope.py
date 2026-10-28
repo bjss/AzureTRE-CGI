@@ -95,16 +95,53 @@ class ScopeTests(unittest.TestCase):
                 scope.verify_lock(self.ctx)
             self.run[key] = before
 
-    def test_missing_ambiguous_or_pending_job_is_refused(self):
-        original = deepcopy(self.jobs)
-        for jobs in ([], original * 2, [{**original[0], "status": "queued"}], [original[0], {**original[0], "id": 11}]):
+    def test_missing_or_pending_job_is_refused_after_the_last_read(self):
+        for jobs in ([], [{**self.jobs[0], "status": "queued"}]):
             self.jobs = jobs
             with (
                 self.subTest(jobs=jobs),
                 patch.object(scope, "github", side_effect=self.github),
+                patch.object(scope.time, "sleep") as wait,
+                patch.object(scope, "verify_concurrency") as lock,
+                redirect_stderr(io.StringIO()),
                 self.assertRaises(scope.RecoveryError),
             ):
                 scope.verify_lock(self.ctx)
+            self.assertEqual(wait.call_count, scope.OWNER_READS - 1)
+            lock.assert_not_called()
+
+    def test_duplicate_or_ambiguous_job_is_refused_without_waiting(self):
+        original = deepcopy(self.jobs)
+        for jobs in (original * 2, [original[0], {**original[0], "id": 11}]):
+            self.jobs = jobs
+            with (
+                self.subTest(jobs=jobs),
+                patch.object(scope, "github", side_effect=self.github),
+                patch.object(scope.time, "sleep") as wait,
+                self.assertRaises(scope.RecoveryError),
+            ):
+                scope.verify_lock(self.ctx)
+            wait.assert_not_called()
+
+    def test_job_that_github_reports_late_is_found_on_a_later_read(self):
+        # Observed live: run 39830101170 found no job in progress while its job ran.
+        started = deepcopy(self.jobs)
+        self.jobs = [{**started[0], "status": "queued"}]
+
+        def wait(seconds):
+            self.jobs = started
+
+        stderr = io.StringIO()
+        with (
+            patch.object(scope, "github", side_effect=self.github),
+            patch.object(scope.time, "sleep", side_effect=wait) as sleep,
+            patch.object(scope, "verify_concurrency") as lock,
+            redirect_stderr(stderr),
+        ):
+            scope.verify_lock(self.ctx)
+        sleep.assert_called_once_with(scope.OWNER_READ_DELAY)
+        lock.assert_called_once_with(self.ctx, job_id=10)
+        self.assertIn("(queued)", stderr.getvalue())
 
     def test_incomplete_or_inconsistent_pages_are_refused(self):
         for data in (
