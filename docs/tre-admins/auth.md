@@ -23,7 +23,7 @@ You can build all of the Identity assets by running the following at the command
 ```bash
 make auth
 ```
-This will create five identities, and if successful will write the outputs to athentication section in `config.yaml` file. If you are building locally, these values will be used when building your TRE. If you are setting this up for CI/CD, then these values will be needed by your Build Orchestrator.
+This will create five identities, and if successful will write the outputs to authentication section in `config.yaml` file. If you are building locally, these values will be used when building your TRE. If you are setting this up for CI/CD, then these values will be needed by your Build Orchestrator.
 
 The contents of your authentication section in `config.yaml` file should contain :
 
@@ -36,13 +36,13 @@ The contents of your authentication section in `config.yaml` file should contain
   | `API_CLIENT_ID` | API application (client) ID. |
   | `API_CLIENT_SECRET` | API application client secret. |
   | `SWAGGER_UI_CLIENT_ID` | Swagger (OpenAPI) UI application (client) ID. |
-  | `WORKSPACE_API_CLIENT_ID` | Each workspace is secured behind it's own AD Application |
-  | `WORKSPACE_API_CLIENT_SECRET` | Each workspace is secured behind it's own AD Application. This is the secret for that application. |
+  | `WORKSPACE_API_CLIENT_ID` | Each workspace is secured behind its own AD Application |
+  | `WORKSPACE_API_CLIENT_SECRET` | Each workspace is secured behind its own AD Application. This is the secret for that application. |
 
 ### Using a separate Microsoft Entra ID tenant
 
 !!! caution
-    This section is only relevant it you are setting up a separate Microsoft Entra ID tenant for use.
+    This section is only relevant if you are setting up a separate Microsoft Entra ID tenant for use.
     This is only recommended for development environments when you don't have the required permissions to register applications in Microsoft Entra ID.
     Using a separate Microsoft Entra ID tenant will prevent you from using certain Microsoft Entra ID integrated services.
     For production deployments, work with your Microsoft Entra ID administrator to perform the required registration

@@ -1,6 +1,7 @@
 import pytest
 
 from e2e_tests.conftest import get_workspace_owner_token, disable_and_delete_ws_resource
+from e2e_tests.resources.resource import temporary_resource
 from helpers import check_aad_auth_redirect
 from resources.resource import get_resource, post_resource
 from resources import strings
@@ -41,13 +42,13 @@ async def test_create_guacamole_service_into_base_workspace(setup_test_workspace
         },
     }
 
-    _, _ = await post_resource(
+    async with temporary_resource(
         user_resource_payload,
         f"/api{workspace_service_path}/{strings.API_USER_RESOURCES}",
         workspace_owner_token,
         verify,
-        method="POST",
-    )
+    ):
+        pass
 
 
 @pytest.mark.extended_aad
@@ -62,14 +63,13 @@ async def test_create_guacamole_service_into_aad_workspace(setup_test_aad_worksp
         "properties": {"display_name": "Workspace service test", "description": "Workspace service for E2E test"},
     }
 
-    workspace_service_path, _ = await post_resource(
+    async with temporary_resource(
         workspace_service_payload,
         f"/api{workspace_path}/{strings.API_WORKSPACE_SERVICES}",
         workspace_owner_token,
         verify,
-    )
-
-    await ping_guacamole_workspace_service(workspace_service_path, workspace_owner_token, verify)
+    ) as workspace_service_path:
+        await ping_guacamole_workspace_service(workspace_service_path, workspace_owner_token, verify)
 
 
 async def ping_guacamole_workspace_service(workspace_service_path, access_token, verify) -> None:

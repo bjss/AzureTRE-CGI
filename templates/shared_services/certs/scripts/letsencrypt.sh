@@ -7,53 +7,89 @@ script_dir=$(realpath "$(dirname "${BASH_SOURCE[0]}")")
 # Installation retries must restart the gateway stopped by the previous attempt.
 start_gateway=true
 
-while [ "$1" != "" ]; do
+usage() {
+    echo "Usage: $0 --storage_account_name <name> --fqdn <fqdn> --keyvault_name <name> --resource_group_name <name> --application_gateway_name <name> --cert_name <name> --password_name <name> [--start_gateway <true|false>]" >&2
+    exit 1
+}
+
+require_value() {
+    if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
+        echo "Missing value for $1" >&2
+        usage
+    fi
+}
+
+storage_account_name=""
+fqdn=""
+keyvault_name=""
+resource_group_name=""
+application_gateway_name=""
+cert_name=""
+password_name=""
+
+while [[ $# -gt 0 ]]; do
     case $1 in
     --storage_account_name)
+        require_value "$1" "${2:-}"
         shift
         storage_account_name=$1
         ;;
     --fqdn)
+        require_value "$1" "${2:-}"
         shift
         fqdn=$1
         ;;
     --keyvault_name)
+        require_value "$1" "${2:-}"
         shift
         keyvault_name=$1
         ;;
     --resource_group_name)
+        require_value "$1" "${2:-}"
         shift
         resource_group_name=$1
         ;;
     --application_gateway_name)
+        require_value "$1" "${2:-}"
         shift
         application_gateway_name=$1
         ;;
     --cert_name)
+        require_value "$1" "${2:-}"
         shift
         cert_name=$1
         ;;
     --password_name)
+        require_value "$1" "${2:-}"
         shift
         password_name=$1
         ;;
     --start_gateway)
+        require_value "$1" "${2:-}"
         shift
         start_gateway=$1
         ;;
     *)
-        echo "Unexpected argument: '$1'"
+        echo "Unexpected argument: '$1'" >&2
         usage
         ;;
     esac
 
-    if [[ -z "$2" ]]; then
-      # if no more args then stop processing
-      break
-    fi
-
     shift # remove the current value for `$1` and use the next
 done
+
+require_value "--storage_account_name" "$storage_account_name"
+require_value "--fqdn" "$fqdn"
+require_value "--keyvault_name" "$keyvault_name"
+require_value "--resource_group_name" "$resource_group_name"
+require_value "--application_gateway_name" "$application_gateway_name"
+require_value "--cert_name" "$cert_name"
+require_value "--password_name" "$password_name"
+
+case "$start_gateway" in
+    true|false) ;;
+    *) echo "start_gateway must be true or false" >&2; usage ;;
+esac
 
 # done with processing args and can set this
 set -o nounset

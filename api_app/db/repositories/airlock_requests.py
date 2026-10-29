@@ -82,6 +82,25 @@ class AirlockRequestRepository(BaseRepository):
         await self.upsert_item_with_etag(new_request, new_request.etag)
         return new_request
 
+    async def restore_airlock_request_item(
+        self, original_request: AirlockRequest, updated_request: AirlockRequest, updated_by: Union[User, dict]
+    ) -> None:
+        current_request = await self.get_airlock_request_by_id(original_request.id)
+        if current_request.status != updated_request.status:
+            raise RuntimeError(
+                f"Airlock request {original_request.id} status changed concurrently; refusing to overwrite newer state"
+            )
+
+        restored_request = copy.deepcopy(current_request)
+        restored_request.status = original_request.status
+        restored_request.statusMessage = original_request.statusMessage
+        await self.update_airlock_request_item(
+            original_request=current_request,
+            new_request=restored_request,
+            updated_by=updated_by,
+            request_properties={"previousStatus": current_request.status},
+        )
+
     @staticmethod
     def airlock_requests_query():
         return "SELECT * FROM c"

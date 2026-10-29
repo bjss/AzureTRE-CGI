@@ -38,7 +38,6 @@
 | `ENABLE_LEGACY_AIRLOCK` | Set to `true` by default. Deploys the legacy per-stage airlock storage accounts alongside the consolidated accounts. Set to `false` only once no `airlock_version=1` workspaces or in-flight v1 requests remain; doing so permanently deletes the legacy accounts and any data still in them. |
 | `ENABLE_LOCAL_DEBUGGING` | Set to `false` by default. Setting this to `true` will ensure that Azure resources are accessible from your local development machine. (e.g. ServiceBus and Cosmos) |
 | `PUBLIC_DEPLOYMENT_IP_ADDRESS` | The public IP address of the machine that is deploying TRE. (Your desktop or the build agents). In certain locations a dynamic script to retrieve this from [https://ipecho.net/plain](https://ipecho.net/plain) does not work. If this is the case, then you can 'hardcode' your IP. |
-| `RESOURCE_PROCESSOR_VMSS_SKU` | The SKU of the VMMS to use for the resource processing VM. |
 | `CORE_APP_SERVICE_PLAN_SKU` | The SKU of AppService plans created for the core infrastructure. |
 | `WORKSPACE_APP_SERVICE_PLAN_SKU` | Optional. The SKU used for AppService plan used in E2E tests unless otherwise specified. Default value is `P1v2`. |
 | `RESOURCE_PROCESSOR_VMSS_SKU` | Optional. The SKU of the resource processor VMSS. Defaults to `Standard_B2s`. |
@@ -68,5 +67,5 @@
   | `API_CLIENT_ID` | API application (client) ID. |
   | `API_CLIENT_SECRET` | API application client secret. |
   | `SWAGGER_UI_CLIENT_ID` | Swagger (OpenAPI) UI application (client) ID. |
-  | `WORKSPACE_API_CLIENT_ID` | Each workspace is secured behind it's own AD Application |
-  | `WORKSPACE_API_CLIENT_SECRET` | Each workspace is secured behind it's own AD Application. This is the secret for that application. |
+  | `WORKSPACE_API_CLIENT_ID` | Each workspace is secured behind its own AD Application |
+  | `WORKSPACE_API_CLIENT_SECRET` | Each workspace is secured behind its own AD Application. This is the secret for that application. |

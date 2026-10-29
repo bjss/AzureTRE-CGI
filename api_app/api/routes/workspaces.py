@@ -34,7 +34,6 @@ from services.legacy_airlock_guard import (
     ensure_airlock_version_change_allowed,
     ensure_workspace_airlock_version_supported,
 )
-from services.airlock import delete_workspace_airlock_containers
 from db.repositories.workspace_services import WorkspaceServiceRepository
 from models.domain.resource import ResourceType
 from models.domain.workspace import WorkspaceAuth, WorkspaceRole
@@ -349,7 +348,6 @@ async def delete_workspace(
     workspace_repo=Depends(get_repository(WorkspaceRepository)),
     resource_template_repo=Depends(get_repository(ResourceTemplateRepository)),
     resource_history_repo=Depends(get_repository(ResourceHistoryRepository)),
-    airlock_request_repo=Depends(get_repository(AirlockRequestRepository)),
 ) -> OperationInResponse:
     if await delete_validation(workspace, workspace_repo):
         operation = await send_uninstall_message(
@@ -362,9 +360,6 @@ async def delete_workspace(
             user=user,
             is_cascade=True,
         )
-
-        # Shared storage outlives the workspace, so remove its containers once uninstall is queued.
-        await delete_workspace_airlock_containers(workspace, airlock_request_repo)
 
         response.headers["Location"] = construct_location_header(operation)
         return OperationInResponse(operation=operation)

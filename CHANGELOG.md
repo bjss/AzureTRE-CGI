@@ -7,6 +7,8 @@ Setting to `false` will delete existing airlock storage accounts and must only b
 
 ENHANCEMENTS:
 * Select individual bundle tests and record lifecycle evidence for base workspaces, private Azure SQL, Airlock, Linux VMs and certificate reuse across reinstallation. ([#5255](https://github.com/microsoft/AzureTRE/pull/5255))
+* Remove the duplicate `RESOURCE_PROCESSOR_VMSS_SKU` documentation entry, retain its optional/default description, and correct the workspace API client possessive. (AI findings tab)
+* Correct spelling and grammar in the authentication setup documentation. (AI findings tab)
 * Enable `user_management_enabled`, `auto_workspace_group_creation`, and `auto_grant_workspace_consent` by default in `config.sample.yaml` for a better out-of-the-box experience ([#5050](https://github.com/microsoft/AzureTRE/issues/5050))
 * Add shared repository instructions and TRE-prefixed component skills for agent-assisted development, security review, validation and troubleshooting. ([#5111](https://github.com/microsoft/AzureTRE/issues/5111))
 * Allow numeric CIDR masks in `address_space_size` (e.g. "23") when requesting auto-assigned address spaces; accepts numeric strings and validates the mask range. (`API` 0.28.0, `tre-workspace-base` 2.12.0, `tre-workspace-unrestricted` 0.15.0, `tre-workspace-airlock-import-review` 0.18.0) ([#4733](https://github.com/microsoft/AzureTRE/issues/4733))
@@ -45,6 +47,13 @@ BUG FIXES:
 * Preserve failed uninstall results and allow cleanup when Porter confirms the installation is absent. Keep resource and operation status available until uninstall steps and final output writes finish. (`API` 0.28.6) ([#5253](https://github.com/microsoft/AzureTRE/pull/5253))
 * Wait for management storage readiness and retry recognised state-access permission failures. Retry bootstrap state creation only when the state blob is confirmed absent. (`devops` 0.6.15) ([#5252](https://github.com/microsoft/AzureTRE/pull/5252))
 * Validate Terraform outputs and preserve the previous cache if output generation or validation fails. (`core` 0.18.14) ([#5252](https://github.com/microsoft/AzureTRE/pull/5252))
+* Delete v2 Airlock containers only after a workspace uninstall succeeds, and retry cleanup when storage deletion fails. (AI findings tab) (`API` 0.28.10)
+* Return a generic error when Airlock Event Grid publishing fails and restore the previous request state when status-change publishing fails. (`API` 0.28.11) (AI findings tab)
+* Preserve native boolean deployment outputs and log the intended diagnostic for callbacks referencing an unknown operation step. (`API` 0.28.12) (AI findings tab)
+* Validate certificate script arguments before performing any operations and show usage for missing values, required options or unknown arguments. (`tre-shared-service-certs` 0.9.1) (AI findings tab)
+* Clean up Guacamole VMs and Microsoft Entra ID workspace services created by E2E tests, including after failures when parent workspaces or services are reused. (AI findings tab)
+* Honour the configured TLS verification setting in the provisioned API health smoke test, enabling certificate verification by default. (AI findings tab)
+* Stop echoing the workspace Gitea administrator password and OIDC client secret in container logs. (`tre-workspace-service-gitea` 1.3.8, `gitea-workspace-service` 0.6.3) (AI findings tab)
 * Restrict Airlock submission, cancellation and draft file links to the request creator or a workspace owner, and align the advertised actions with these permissions. (`API` 0.28.3) ([#5251](https://github.com/microsoft/AzureTRE/pull/5251))
 * Validate Airlock sort fields against the supported options and avoid returning database error details to callers. (`API` 0.28.3) ([#5251](https://github.com/microsoft/AzureTRE/pull/5251))
 * Bind operation retrieval to the authorised resource and return not found for unrelated operations. (`API` 0.28.3) ([#5251](https://github.com/microsoft/AzureTRE/pull/5251))

@@ -155,6 +155,43 @@ async def test_update_airlock_request_item_accepts_dict_updated_by(airlock_reque
     airlock_request_repo.upsert_item_with_etag.assert_called_once()
 
 
+async def test_restore_airlock_request_item_preserves_current_fields(airlock_request_repo):
+    original_request = airlock_request_mock(status=SUBMITTED)
+    updated_request = airlock_request_mock(status=IN_REVIEW)
+    updated_request.resourceVersion = original_request.resourceVersion + 1
+    updated_request.title = "Updated title"
+    current_request = updated_request.model_copy(deep=True)
+    airlock_request_repo.get_airlock_request_by_id = AsyncMock(return_value=current_request)
+    airlock_request_repo.update_airlock_request_item = AsyncMock()
+    updated_by = create_test_user()
+
+    await airlock_request_repo.restore_airlock_request_item(original_request, updated_request, updated_by)
+
+    call = airlock_request_repo.update_airlock_request_item.await_args.kwargs
+    current = call["original_request"]
+    restored_request = call["new_request"]
+    actor = call["updated_by"]
+    history_properties = call["request_properties"]
+    assert current == current_request
+    assert restored_request.status == original_request.status
+    assert restored_request.title == updated_request.title
+    assert actor == updated_by
+    assert history_properties == {"previousStatus": AirlockRequestStatus.InReview}
+
+
+async def test_restore_airlock_request_item_refuses_to_overwrite_newer_status(airlock_request_repo):
+    original_request = airlock_request_mock(status=SUBMITTED)
+    updated_request = airlock_request_mock(status=IN_REVIEW)
+    current_request = airlock_request_mock(status=APPROVED)
+    airlock_request_repo.get_airlock_request_by_id = AsyncMock(return_value=current_request)
+    airlock_request_repo.update_airlock_request_item = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="status changed concurrently"):
+        await airlock_request_repo.restore_airlock_request_item(original_request, updated_request, create_test_user())
+
+    airlock_request_repo.update_airlock_request_item.assert_not_awaited()
+
+
 async def test_create_airlock_request_item_creates_an_airlock_request_with_the_right_values(
     sample_airlock_request_input, airlock_request_repo
 ):

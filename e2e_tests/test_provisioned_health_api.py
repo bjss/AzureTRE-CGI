@@ -9,8 +9,8 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
 @pytest.mark.smoke
-async def test_health() -> None:
-    async with AsyncClient(verify=False) as client:
+async def test_health(verify: bool) -> None:
+    async with AsyncClient(verify=verify) as client:
         url = f"{config.TRE_URL}{strings.API_HEALTH}"
         # Azure management health checks can exceed HTTPX's five-second default.
         response = await client.get(url, timeout=30)

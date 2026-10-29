@@ -343,6 +343,7 @@ async def test_save_and_publish_event_airlock_request_raises_503_if_save_to_db_f
             workspace=sample_workspace(),
         )
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert ex.value.detail == strings.STATE_STORE_ENDPOINT_NOT_RESPONDING
 
 
 @pytest.mark.asyncio
@@ -373,6 +374,7 @@ async def test_save_and_publish_event_airlock_request_raises_503_if_publish_even
             workspace=sample_workspace(),
         )
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert ex.value.detail == strings.EVENT_GRID_GENERAL_ERROR_MESSAGE
 
 
 @pytest.mark.asyncio
@@ -608,12 +610,16 @@ async def test_update_and_publish_event_airlock_request_raises_400_if_status_upd
         "AirlockManager": ["manager@outlook.com"],
     },
 )
-async def test_update_and_publish_event_airlock_request_raises_503_if_publish_event_fails(
+async def test_update_and_publish_event_airlock_request_restores_request_if_status_event_fails(
     _, event_grid_publisher_client_mock, airlock_request_repo_mock
 ):
     airlock_request_mock = sample_airlock_request()
     updated_airlock_request_mock = sample_airlock_request(status=AirlockRequestStatus.Submitted)
+    updated_airlock_request_mock.resourceVersion = airlock_request_mock.resourceVersion + 1
+    updated_airlock_request_mock.etag = "updated-etag"
     airlock_request_repo_mock.update_airlock_request = AsyncMock(return_value=updated_airlock_request_mock)
+    airlock_request_repo_mock.restore_airlock_request_item = AsyncMock()
+    updated_by = create_test_user()
     event_grid_sender_client_mock = event_grid_publisher_client_mock.return_value
     event_grid_sender_client_mock.send = AsyncMock(side_effect=Exception)
 
@@ -621,11 +627,15 @@ async def test_update_and_publish_event_airlock_request_raises_503_if_publish_ev
         await update_and_publish_event_airlock_request(
             airlock_request=airlock_request_mock,
             airlock_request_repo=airlock_request_repo_mock,
-            updated_by=create_test_user(),
+            updated_by=updated_by,
             new_status=AirlockRequestStatus.Submitted,
             workspace=sample_workspace(),
         )
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert ex.value.detail == strings.EVENT_GRID_GENERAL_ERROR_MESSAGE
+    airlock_request_repo_mock.restore_airlock_request_item.assert_awaited_once_with(
+        original_request=airlock_request_mock, updated_request=updated_airlock_request_mock, updated_by=updated_by
+    )
 
 
 @pytest.mark.asyncio
@@ -833,9 +843,9 @@ async def test_save_and_publish_event_airlock_request_raises_503_if_graph_call_f
             user=create_test_user(),
             workspace=sample_workspace(),
         )
-
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert "Graph" in ex.value.detail
+    assert ex.value.detail == strings.GRAPH_ROLE_ASSIGNMENT_ERROR
+    assert ex.value.detail == strings.GRAPH_ROLE_ASSIGNMENT_ERROR
     # DB should never have been touched
     airlock_request_repo_mock.save_item.assert_not_called()
 
@@ -850,10 +860,10 @@ async def test_save_and_publish_event_airlock_request_raises_503_if_graph_call_f
         "AirlockManager": ["m@example.com"],
     },
 )
-async def test_save_and_publish_event_airlock_request_503_includes_underlying_error(
+async def test_save_and_publish_event_airlock_request_does_not_expose_event_grid_error(
     _, event_grid_publisher_client_mock, airlock_request_repo_mock
 ):
-    """The 503 detail from an Event Grid failure includes the underlying exception message."""
+    """The 503 detail from an Event Grid failure does not expose exception details."""
     underlying_msg = "connection reset by peer"
     airlock_request_mock = sample_airlock_request()
     airlock_request_repo_mock.save_item = AsyncMock(return_value=None)
@@ -870,7 +880,8 @@ async def test_save_and_publish_event_airlock_request_503_includes_underlying_er
         )
 
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert underlying_msg in ex.value.detail
+    assert ex.value.detail == strings.EVENT_GRID_GENERAL_ERROR_MESSAGE
+    assert underlying_msg not in ex.value.detail
 
 
 @pytest.mark.asyncio
@@ -896,6 +907,7 @@ async def test_update_and_publish_event_airlock_request_raises_503_if_graph_call
 
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert "Graph" in ex.value.detail
+    airlock_request_repo_mock.update_airlock_request.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -908,14 +920,17 @@ async def test_update_and_publish_event_airlock_request_raises_503_if_graph_call
         "AirlockManager": ["m@example.com"],
     },
 )
-async def test_update_and_publish_event_airlock_request_503_includes_underlying_error(
+async def test_update_and_publish_event_airlock_request_does_not_expose_event_grid_error(
     _, event_grid_publisher_client_mock, airlock_request_repo_mock
 ):
-    """The 503 detail from an Event Grid failure in update_and_publish includes the underlying exception message."""
+    """The 503 detail from an Event Grid failure does not expose exception details."""
     underlying_msg = "topic endpoint unreachable"
     airlock_request_mock = sample_airlock_request()
     updated_airlock_request_mock = sample_airlock_request(status=AirlockRequestStatus.Submitted)
+    updated_airlock_request_mock.resourceVersion = airlock_request_mock.resourceVersion + 1
+    updated_airlock_request_mock.etag = "updated-etag"
     airlock_request_repo_mock.update_airlock_request = AsyncMock(return_value=updated_airlock_request_mock)
+    airlock_request_repo_mock.restore_airlock_request_item = AsyncMock()
     event_grid_sender_client_mock = event_grid_publisher_client_mock.return_value
     event_grid_sender_client_mock.send = AsyncMock(side_effect=Exception(underlying_msg))
 
@@ -929,7 +944,9 @@ async def test_update_and_publish_event_airlock_request_503_includes_underlying_
         )
 
     assert ex.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-    assert underlying_msg in ex.value.detail
+    assert ex.value.detail == strings.EVENT_GRID_GENERAL_ERROR_MESSAGE
+    assert underlying_msg not in ex.value.detail
+    airlock_request_repo_mock.restore_airlock_request_item.assert_awaited_once()
 
 
 def test_authenticated_user_with_empty_email_persists_and_builds_notification():
@@ -1079,7 +1096,7 @@ async def test_delete_workspace_airlock_containers_skips_legacy_workspace(mock_b
 @pytest.mark.asyncio
 @patch("services.airlock.credentials")
 @patch("services.airlock.BlobServiceClient")
-async def test_delete_workspace_airlock_containers_does_not_raise_on_failure(mock_bsc, _mock_credentials):
+async def test_delete_workspace_airlock_containers_raises_on_failure(mock_bsc, _mock_credentials):
     from services.airlock import delete_workspace_airlock_containers
 
     workspace = MagicMock()
@@ -1088,4 +1105,5 @@ async def test_delete_workspace_airlock_containers_does_not_raise_on_failure(moc
     repo = AsyncMock()
     repo.get_data_retaining_airlock_request_ids_for_workspace.return_value = ["req-1"]
     mock_bsc.return_value.get_container_client.return_value.delete_container.side_effect = Exception("boom")
-    await delete_workspace_airlock_containers(workspace, repo)
+    with pytest.raises(RuntimeError, match="Could not delete airlock containers"):
+        await delete_workspace_airlock_containers(workspace, repo)

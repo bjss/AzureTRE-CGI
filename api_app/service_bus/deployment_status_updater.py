@@ -6,7 +6,7 @@ import time
 from pydantic import ValidationError, TypeAdapter
 
 from api.routes.resource_helpers import get_timestamp
-from models.domain.resource import Output
+from models.domain.resource import Output, ResourceType
 from db.repositories.resources_history import ResourceHistoryRepository
 from models.domain.request_action import RequestAction
 from db.repositories.resource_templates import ResourceTemplateRepository
@@ -15,11 +15,14 @@ from azure.servicebus import NEXT_AVAILABLE_SESSION
 from azure.servicebus.exceptions import OperationTimeoutError, ServiceBusConnectionError
 from azure.servicebus.aio import ServiceBusClient, AutoLockRenewer
 from db.repositories.operations import OperationRepository
+from db.repositories.airlock_requests import AirlockRequestRepository
 from core import config, credentials
 from db.errors import EntityDoesNotExist
 from db.repositories.resources import ResourceRepository
 from models.domain.operation import DeploymentStatusUpdateMessage, Operation, OperationStep, Status
+from models.domain.workspace import Workspace
 from resources import strings
+from services.airlock import delete_workspace_airlock_containers
 from services.logging import logger, tracer
 
 
@@ -149,7 +152,7 @@ class DeploymentStatusUpdater:
                         is_last_step = True
 
             if step_to_update is None:
-                raise f"Error finding step {message.stepId} in operation {message.operationId}"
+                raise ValueError(f"Error finding step {message.stepId} in operation {message.operationId}")
 
             uninstall_operation = operation.action == RequestAction.UnInstall
             uninstall_pending_status = Status.PipelineRunning if len(operation.steps) > 1 else Status.Deleting
@@ -214,6 +217,14 @@ class DeploymentStatusUpdater:
             await self.resource_repo.update_item_dict(resource_to_persist)
 
             if uninstall_operation and is_last_step:
+                main_step = next((step for step in operation.steps if step.templateStepId == "main"), None)
+                if main_step is not None and main_step.resourceType == ResourceType.Workspace:
+                    workspace = await self.resource_repo.get_resource_by_id(uuid.UUID(operation.resourceId))
+                    if not isinstance(workspace, Workspace):
+                        raise TypeError(f"Expected workspace resource for uninstall operation {operation.id}")
+                    airlock_request_repo = await AirlockRequestRepository.create()
+                    await delete_workspace_airlock_containers(workspace, airlock_request_repo)
+
                 # Publish success only after saving the final outputs. Keep the
                 # root visible if the operation write still needs redelivery.
                 await self.update_overall_operation_status(operation, step_to_update, is_last_step)
@@ -375,7 +386,7 @@ class DeploymentStatusUpdater:
 
         return resource
 
-    def convert_outputs_to_dict(self, outputs_list: [Output]):
+    def convert_outputs_to_dict(self, outputs_list: list[Output]):
         """
         Convert a list of Porter outputs to a dictionary
         """
@@ -393,8 +404,9 @@ class DeploymentStatusUpdater:
                 value = value.strip("'").strip('"')
             elif obj_type == "boolean":
                 if isinstance(value, str):
-                    value = value.strip("'").strip('"')
-                value = value.lower() == "true"
+                    value = value.strip("'").strip('"').lower() == "true"
+                elif not isinstance(value, bool):
+                    raise ValueError(f"Boolean output {name} must be a boolean or string")
 
             result_dict[name] = value
 
