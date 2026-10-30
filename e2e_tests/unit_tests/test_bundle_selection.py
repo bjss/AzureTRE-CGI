@@ -234,9 +234,9 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertNotIn("test_shared_services.py::test_create_certificate_shared_service", collected)
 
     def test_unavailable_bundle_fails_with_its_coverage_gap(self):
-        result, report = self.run_selector("--bundle", "tre-service-databricks", "--validate-only")
+        result, report = self.run_selector("--bundle", "tre-service-guacamole-export-reviewvm", "--validate-only")
         self.assertEqual(result.returncode, 2)
-        self.assertIn("#5126", report["error"])
+        self.assertIn("#5127", report["error"])
         self.assertEqual(report["collected_tests"], [])
 
     def test_openai_selects_the_guarded_case_and_reports_remaining_coverage(self):

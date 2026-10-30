@@ -204,7 +204,9 @@ class WorkflowPrerequisiteTests(unittest.TestCase):
         self.assertNotIn("${{ inputs.TEST_AML_USER_OBJECT_ID }}", step["run"])
         jobs = yaml.safe_load((ROOT / ".github/workflows/deploy_tre_reusable.yml").read_text())["jobs"]
         steps = jobs["e2e_tests_bundle"]["steps"]
-        self.assertIn("AML_VALIDATION_DEADLINE", steps[0]["run"])
+        names = [s["name"] for s in steps]
+        deadline = next(s for s in steps if "AML_VALIDATION_DEADLINE=$((" in s.get("run", ""))
+        self.assertLess(names.index(deadline["name"]), names.index("Checkout"))
         run = next(s for s in steps if s["name"] == "Run E2E Tests")
         self.assertIn("AML_VALIDATION_DEADLINE=${{ env.AML_VALIDATION_DEADLINE }}", run["with"]["COMMAND"])
         self.assertEqual(run["with"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}")
