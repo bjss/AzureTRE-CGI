@@ -41,7 +41,7 @@ async def migrate_database():
         )
         migrations.append(
             Migration(
-                issueNumber="92",
+                issueNumber="94",
                 status=f"Masked sensitive values in {changed_resources} resource(s) and {changed_history_items} history item(s)",
             )
         )
