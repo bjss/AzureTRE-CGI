@@ -100,6 +100,7 @@ Service creation has a 45-minute deadline. Verification has a separate five-minu
 Failed creation and teardown use the existing helper's separate cleanup deadline.
 A configured workspace is retained. A fixture-created workspace uses the fixture's cleanup.
 Private inference, access control, upgrades and complete physical cleanup remain separate checks.
+
 ### Azure ML selection
 
 Select `tre-service-azureml` for the private parent-service case.
@@ -133,6 +134,7 @@ Missing prerequisites and failed assertions fail the case. They do not count as 
 
 These cases do not prove notebook execution, interactive user access, prior-version upgrades or deletion of every dependent Azure artefact.
 The compute bundle defines no custom actions. Retain these limits in each bundle's evidence record.
+
 ### Databricks selection
 
 Select `tre-shared-service-databricks-private-auth` for the authentication service lifecycle.

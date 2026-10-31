@@ -46,7 +46,13 @@ resource "terraform_data" "managed_resource_group_cleanup" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<EOT
 set -euo pipefail
-az login --identity --output none
+# Use the cloud and the credentials of the bundle, as the resource processor does.
+az cloud set --name "$${AZURE_ENVIRONMENT:-AzureCloud}"
+if [ "$${ARM_USE_MSI:-true}" = "true" ]; then
+  az login --identity --output none
+else
+  az login --service-principal --username "$ARM_CLIENT_ID" --password "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
+fi
 az account set --subscription "${self.input.subscription_id}"
 group="${self.input.managed_resource_group_name}"
 workspace="${self.input.workspace_id}"
@@ -54,7 +60,9 @@ if az resource show --ids "$workspace" --output none 2>/dev/null; then
   echo "The Databricks workspace still exists, so its managed resource group stays"
   exit 0
 fi
-if [ "$(az group exists --name "$group")" != "true" ]; then
+# A failed call stops the script here. Inside the test, set -e does not stop it.
+exists=$(az group exists --name "$group")
+if [ "$exists" != "true" ]; then
   echo "Databricks deleted its managed resource group"
   exit 0
 fi
