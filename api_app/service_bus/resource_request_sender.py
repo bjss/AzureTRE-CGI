@@ -1,4 +1,5 @@
 import json
+import os
 
 from db.repositories.resources import ResourceRepository
 from db.repositories.resource_templates import ResourceTemplateRepository
@@ -55,6 +56,12 @@ async def send_resource_request_message(
             resource_properties=resource.properties,
         )
         current_span.set_attribute("operation_id", operation.id)
+
+        # Validation only: stop this API worker after the operation write and before the send.
+        display_name = str((resource.properties or {}).get("display_name", ""))
+        if action == RequestAction.Install and display_name.startswith("validation-stop-before-send"):
+            logger.warning(f"Validation only: the API worker stops before it sends operation {operation.id}")
+            os._exit(1)
 
         # prep the first step to send in SB
         # resource at this point is the original object with unmaskked values

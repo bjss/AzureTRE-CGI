@@ -595,6 +595,22 @@ async def invoke_porter_action(
         await send_status(statuses.failed_status_string_for[action], str(error))
         return False
 
+    # Validation only: uninstall the installation outside the API before an upgrade with this marker.
+    if action == "upgrade" and str(msg_body.get("parameters", {}).get("display_name", "")).startswith(
+        "validation-upgrade-after-uninstall"
+    ):
+        uninstall_body = dict(msg_body, action="uninstall")
+        u_command, u_set_file, u_set_name, u_installation_file = await build_porter_command(
+            config, uninstall_body, False
+        )
+        try:
+            u_returncode, _, _ = await run_porter(u_command, config)
+        finally:
+            await _cleanup_param_set(u_set_name, u_set_file, u_installation_file, config)
+        logger.warning(
+            f"Validation only: the uninstall before the upgrade of {installation_id} returned {u_returncode}"
+        )
+
     logger.debug("Starting to run porter execution command...")
     try:
         check_installation = installation_id if action not in ("install", "upgrade") else None
