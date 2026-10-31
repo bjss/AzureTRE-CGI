@@ -84,8 +84,8 @@ async def install_without_services(workspace_path, token, verify):
         path = response.json()["operation"]["resourcePath"]
         operation = response.headers["Location"]
         state = await wait_for(install_done, client, operation, token, [])
-        _, message, _ = await check_deployment(client, operation, token)
-    words = " ".join(message.replace("\u2502", " ").split())
+        _, message, steps = await check_deployment(client, operation, token)
+    words = " ".join(f"{message} {steps}".replace("\u2502", " ").split())
     LOGGER.info("Validation only: an install without services ended in %s", state)
     assert state == strings.RESOURCE_STATUS_DEPLOYMENT_FAILED
     assert "Deploy FHIR, DICOM or both" in words, words[:500]
