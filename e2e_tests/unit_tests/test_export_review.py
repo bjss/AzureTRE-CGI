@@ -42,8 +42,11 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.events = []
         self.identity = token(["WorkspaceOwner", "AirlockManager"])
         self.tamper_final = {"overwrite": 404, "add": 404, "delete": 404}
+        self.tamper_attempts = 200
+        self.tamper_delay = 0
         # The real lead gives the Run Command time to start. A test needs no wait.
         self.enterContext(patch.object(export, "TAMPER_LEAD_SECONDS", 2))
+        self.enterContext(patch.object(export, "TAMPER_CLOCK_MARGIN_SECONDS", 0))
         self.enterContext(
             patch.object(
                 export,
@@ -207,7 +210,12 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 while "submit" not in self.events:
                     await asyncio.sleep(0)
                 self.assertGreater(kwargs["start_at"], self.submitted_at)
-                return {"accepted_writes": 0, "final": self.tamper_final}
+                return {
+                    "accepted_writes": 0,
+                    "attempted_writes": self.tamper_attempts,
+                    "start_delay_seconds": self.tamper_delay,
+                    "final": self.tamper_final,
+                }
 
         async def deletion(*args):
             self.events.append("automatic-delete")
@@ -269,6 +277,15 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.probe.await_args_list[0].kwargs["content"], self.probe.await_args_list[1].kwargs["content"]
         )
+
+    async def test_a_tamper_probe_without_writes_in_the_handover_fails_before_review(self):
+        for attempts, delay, message in ((0, 0, "sent no write"), (200, 60, "started 60 s late")):
+            with self.subTest(attempts=attempts, delay=delay):
+                self.events.clear()
+                self.tamper_attempts, self.tamper_delay = attempts, delay
+                with self.assertRaisesRegex(AssertionError, message):
+                    await export.test_airlock_export_review_vm_flow(True)
+                self.assertNotIn("review", self.events)
 
     async def test_an_old_draft_sas_that_still_writes_after_the_handover_fails_before_review(self):
         self.tamper_final = {"overwrite": 201, "add": 404, "delete": 404}
@@ -420,6 +437,30 @@ class ExportDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ApprovedCopyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_approved_copy_reads_keep_the_sas_out_of_the_log(self):
+        import hashlib
+        import logging
+
+        import httpx
+
+        content = b"Synthetic export"
+        transport = httpx.MockTransport(
+            lambda request: (
+                httpx.Response(200, text="<Name>a.txt</Name>")
+                if "comp=list" in str(request.url)
+                else httpx.Response(200, content=content)
+            )
+        )
+        link = {"containerUrl": f"https://stalairlocktre.blob.core.windows.net/{REQUEST}?sig=secret-sas-value"}
+        with (
+            patch.object(export, "get_request", AsyncMock(return_value=link)),
+            patch.object(export, "AsyncClient", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs)),
+            self.assertLogs(level=logging.DEBUG) as logs,
+        ):
+            await export.assert_approved_copy("/endpoint", "token", True, "a.txt", hashlib.sha256(content).hexdigest())
+        self.assertNotIn("secret-sas-value", "\n".join(logs.output))
+        self.assertEqual(logging.getLogger("httpx").level, logging.NOTSET)
+
     async def test_the_approved_copy_must_hold_the_submitted_file_only(self):
         import hashlib
 

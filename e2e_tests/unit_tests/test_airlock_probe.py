@@ -229,7 +229,13 @@ class ProbeCommandTests(unittest.IsolatedAsyncioTestCase):
             arm.request.assert_not_awaited()
 
 
-TAMPER = {"phase": "tamper", "accepted_writes": 2, "final": {"overwrite": 404, "add": 404, "delete": 404}}
+TAMPER = {
+    "phase": "tamper",
+    "accepted_writes": 2,
+    "attempted_writes": 200,
+    "start_delay_seconds": 0,
+    "final": {"overwrite": 404, "add": 404, "delete": 404},
+}
 
 
 class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
@@ -279,6 +285,9 @@ class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
         for overrides in (
             {"accepted_writes": -1},
             {"accepted_writes": "2"},
+            {"attempted_writes": -1},
+            {"accepted_writes": 3, "attempted_writes": 2},
+            {"start_delay_seconds": "0"},
             {"final": {"overwrite": 404, "add": 404}},
             {"final": {"overwrite": "404", "add": 404, "delete": 404}},
             {"sha256": "0" * 64},

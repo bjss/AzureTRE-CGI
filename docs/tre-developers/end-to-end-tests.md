@@ -46,7 +46,7 @@ After submission, the test checks that the old draft SAS cannot write a new blob
 A `ContainerNotFound` or `AuthorizationPermissionMismatch` response must also have independent ARM evidence:
 the draft is absent, and the submitted container exists with matching workspace and import-stage metadata.
 A permission error alone cannot pass the test. Other storage errors and ARM lookup failures remain test failures.
-These checks share a 60-second deadline. They do not compare submitted file contents. The review-VM lifecycle test also does not verify file contents.
+These checks share a 60-second deadline. They do not compare submitted file contents. The import review-VM lifecycle test also does not verify file contents.
 
 ## Validate one bundle
 
@@ -165,6 +165,7 @@ Neither bundle defines custom actions. Endpoint completeness checks do not estab
 Switzerland North's previously empty storage and Event Hubs lists are corrected using the
 [documented regional endpoints](https://learn.microsoft.com/en-us/azure/databricks/resources/ip-domain-region).
 The current DBFS storage name contains only the last four characters of the service ID, so a global name collision can still prevent deployment.
+
 ### Export review-VM selection
 
 Select `tre-service-guacamole-export-reviewvm` to run `test_airlock_export_review.py::test_airlock_export_review_vm_flow`.
@@ -183,7 +184,8 @@ The upload VM sends one synthetic blob to the export draft through the workspace
 The SAS is a protected Run Command parameter. The probe does not print it.
 The submission fixes the content. Before the submit, the case starts a second probe on the upload VM with a start time.
 The case submits the request before that time, so each write of the probe comes after the submission.
-For 2 minutes the probe writes changed content through the old draft SAS, and it counts the writes that Azure accepts.
+For up to 2 minutes the probe writes changed content through the old draft SAS. It counts the attempts and the writes that Azure accepts.
+The case fails if the probe sends no write, or if it starts more than 30 seconds after the planned time.
 It then tries an overwrite, a new blob and a delete through the same SAS. Each attempt must fail.
 After the request reaches `in_review`, the case creates an export review VM in the same workspace.
 The review copy must hold only the submitted file with the submitted hash, also if a write after the submission passed.

@@ -2,7 +2,7 @@
 
 import asyncio
 import base64
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager, suppress
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -42,6 +42,9 @@ LOGGER = logging.getLogger(__name__)
 LIFECYCLE_SECONDS = 270 * 60
 # The tamper probe starts this long after its Run Command, so the submit comes before its first write.
 TAMPER_LEAD_SECONDS = 150
+TAMPER_CLOCK_MARGIN_SECONDS = 2
+# The probe writes for 120 seconds. A later start can miss the handover.
+TAMPER_MAX_START_DELAY_SECONDS = 30
 CLEANUP_RESERVE_SECONDS = 120 * 60
 REVIEW_TEMPLATE = "tre-service-guacamole-export-reviewvm"
 VM_PAYLOAD = {
@@ -176,10 +179,28 @@ async def owned_vm(arm, resource_path, template, workspace_id, service_id, token
     return vm_id, vm["location"]
 
 
+@contextmanager
+def no_request_urls_in_the_log():
+    """httpx logs each request URL at INFO level. A SAS in a URL must not go to the CI log."""
+    httpx_logger = logging.getLogger("httpx")
+    level = httpx_logger.level
+    httpx_logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        httpx_logger.setLevel(level)
+
+
 async def assert_approved_copy(endpoint, token, verify, blob_name, expected_hash):
     """Download the approved export with its link and compare the file list and the content."""
     link = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"]
     base, sas = link.split("?", 1)
+    with no_request_urls_in_the_log():
+        await read_approved_copy(base, sas, blob_name, expected_hash)
+    LOGGER.info("The approved export has the submitted file only, with the submitted content")
+
+
+async def read_approved_copy(base, sas, blob_name, expected_hash):
     async with AsyncClient(timeout=30) as client:
         listing = await client.get(f"{base}?restype=container&comp=list&{sas}")
         assert listing.status_code == 200, f"Listing the approved export failed with HTTP {listing.status_code}"
@@ -188,7 +209,6 @@ async def assert_approved_copy(endpoint, token, verify, blob_name, expected_hash
         download = await client.get(f"{base}/{blob_name}?{sas}")
         assert download.status_code == 200, f"Reading the approved export failed with HTTP {download.status_code}"
     assert hashlib.sha256(download.content).hexdigest() == expected_hash, "The approved export changed"
-    LOGGER.info("The approved export has the submitted file only, with the submitted content")
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -265,7 +285,10 @@ async def test_airlock_export_review_vm_flow(verify):
             await run_probe(arm, seed_vm, seed_location, phase="upload", container_url=container_url, **probe)
             expected_hash = hashlib.sha256(probe["content"].encode()).hexdigest()
             # The submission fixes the content. Writes through the old draft SAS start just after it.
-            start_at = datetime.now(timezone.utc) + timedelta(seconds=TAMPER_LEAD_SECONDS)
+            # The probe gets StartAt in whole seconds, so the test uses the same rounded time.
+            start_at = (datetime.now(timezone.utc) + timedelta(seconds=TAMPER_LEAD_SECONDS)).replace(
+                microsecond=0
+            ) + timedelta(seconds=1)
             tamper = asyncio.create_task(
                 run_probe(
                     arm,
@@ -280,7 +303,10 @@ async def test_airlock_export_review_vm_flow(verify):
             try:
                 await asyncio.sleep(max(0, (start_at - datetime.now(timezone.utc)).total_seconds() - 15))
                 submitted = await post_request(None, endpoint + "/submit", token, verify, 200)
-                assert datetime.now(timezone.utc) < start_at, "The submit ended after the first tamper write"
+                # The margin covers a small difference between the clocks of the runner and the VM.
+                assert datetime.now(timezone.utc) < start_at - timedelta(seconds=TAMPER_CLOCK_MARGIN_SECONDS), (
+                    "The submit ended after the first tamper write"
+                )
                 evidence = await tamper
             finally:
                 if not tamper.done():
@@ -289,9 +315,15 @@ async def test_airlock_export_review_vm_flow(verify):
                         await tamper
             assert submitted["airlockRequest"]["status"] == airlock_strings.SUBMITTED_STATUS
             LOGGER.info(
-                "Old draft SAS after submission: %d writes accepted, final attempts %s",
+                "Old draft SAS after submission: %d of %d writes accepted, start delay %d s, final attempts %s",
                 evidence["accepted_writes"],
+                evidence["attempted_writes"],
+                evidence["start_delay_seconds"],
                 evidence["final"],
+            )
+            assert evidence["attempted_writes"] > 0, "The tamper probe sent no write during the handover"
+            assert evidence["start_delay_seconds"] <= TAMPER_MAX_START_DELAY_SECONDS, (
+                f"The tamper probe started {evidence['start_delay_seconds']} s late, after the handover"
             )
             assert all(code >= 400 for code in evidence["final"].values()), (
                 f"The old draft SAS still changes data after the handover: {evidence['final']}"
