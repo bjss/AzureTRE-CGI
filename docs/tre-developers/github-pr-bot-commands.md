@@ -22,8 +22,7 @@ The table describes the selected assertions. A passing command does not prove ev
 | `/test-airlock` | Import requests, access checks, the import review VM flow and export request storage routing | No export review VM or migration proof. |
 | `/test-backups` | Base workspace deployment with backups enabled and disabled | No backup restore or retention proof. |
 
-The `workspace_services`, `linux_vm`, `airlock_validation`, `sql_validation`, `mysql_validation` and `gitea_validation` markers have no dedicated slash command.
-The `workspace_services`, `linux_vm`, `airlock_validation`, `export_review_validation` and `sql_validation` markers have no dedicated slash command.
+The `workspace_services`, `linux_vm`, `airlock_validation`, `sql_validation`, `mysql_validation`, `gitea_validation` and `export_review_validation` markers have no dedicated slash command.
 Use the branch workflow or the local test runner for these selections.
 The `airlock_validation` marker selects two Airlock cases. It does not select the full `airlock` suite.
 Export review-VM validation is a separate opt-in bundle case with a private upload and review-data hash check.
