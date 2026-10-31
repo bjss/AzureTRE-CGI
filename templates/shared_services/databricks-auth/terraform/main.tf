@@ -38,8 +38,56 @@ resource "azurerm_databricks_workspace" "databricks" {
 
   depends_on = [
     azurerm_subnet_network_security_group_association.host,
-    azurerm_subnet_network_security_group_association.container
+    azurerm_subnet_network_security_group_association.container,
+    terraform_data.managed_resource_group_cleanup
   ]
+}
+
+# Databricks deletes its managed resource group during the workspace delete. With the default storage firewall, Event Grid
+# cannot get a SAS for the workspace storage account, and Databricks then leaves that account and its group behind.
+# The workspace depends on this resource, so on destroy this step runs after the workspace delete and removes the group.
+# It deletes only a group that is still managed by this workspace after the workspace is gone.
+resource "terraform_data" "managed_resource_group_cleanup" {
+  input = {
+    subscription_id             = split("/", azurerm_resource_group.rg.id)[2]
+    managed_resource_group_name = local.managed_resource_group_name
+    workspace_id                = "${azurerm_resource_group.rg.id}/providers/Microsoft.Databricks/workspaces/${local.databricks_workspace_name}"
+  }
+
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<EOT
+set -euo pipefail
+# Use the cloud and the credentials of the bundle, as the resource processor does.
+az cloud set --name "$${AZURE_ENVIRONMENT:-AzureCloud}"
+if [ "$${ARM_USE_MSI:-true}" = "true" ]; then
+  az login --identity --output none
+else
+  az login --service-principal --username "$ARM_CLIENT_ID" --password "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
+fi
+az account set --subscription "${self.input.subscription_id}"
+group="${self.input.managed_resource_group_name}"
+workspace="${self.input.workspace_id}"
+if az resource show --ids "$workspace" --output none 2>/dev/null; then
+  echo "The Databricks workspace still exists, so its managed resource group stays"
+  exit 0
+fi
+# A failed call stops the script here. Inside the test, set -e does not stop it.
+exists=$(az group exists --name "$group")
+if [ "$exists" != "true" ]; then
+  echo "Databricks deleted its managed resource group"
+  exit 0
+fi
+managed_by=$(az group show --name "$group" --query managedBy --output tsv)
+if [ "$(echo "$managed_by" | tr '[:upper:]' '[:lower:]')" != "$(echo "$workspace" | tr '[:upper:]' '[:lower:]')" ]; then
+  echo "The resource group $group is not managed by $workspace, so it stays" >&2
+  exit 1
+fi
+echo "Databricks left its managed resource group $group, so delete it"
+az group delete --name "$group" --yes
+EOT
+  }
 }
 
 // required to set default_storage_firewall_enabled = true

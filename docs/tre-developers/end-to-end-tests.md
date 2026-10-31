@@ -101,6 +101,71 @@ Failed creation and teardown use the existing helper's separate cleanup deadline
 A configured workspace is retained. A fixture-created workspace uses the fixture's cleanup.
 Private inference, access control, upgrades and complete physical cleanup remain separate checks.
 
+### Azure ML selection
+
+Select `tre-service-azureml` for the private parent-service case.
+Select `tre-user-resource-aml-compute-instance` for the assigned compute case and its parent prerequisites.
+The branch workflow publishes the compute bundle and registers it after Azure ML.
+For local execution, build, publish and register the base workspace, Azure ML service and compute bundle first.
+Use the separate bundle job with one process and run mutating suites sequentially.
+
+Both cases create an Automatic workspace and require non-empty owner and researcher group IDs.
+They ignore configured workspace and service IDs. The old generic Azure ML case is replaced by the focused parent selection.
+The test identity needs the existing Automatic-workspace permissions. Automatic workspace group creation must be enabled.
+ARM inspection currently supports AzureCloud and requires matching authentication and Azure tenants.
+
+For compute, set the environment variable `TEST_AML_USER_OBJECT_ID` to an existing Entra user's object ID.
+In GitHub Actions, set the same name as a secret on the selected GitHub environment.
+Do not use an application or service-principal object ID.
+Preflight checks UUID syntax. It does not query the directory or establish the user's type, existence or access.
+The test does not read Graph, grant roles or add group membership.
+The assigned user still needs the normal workspace access before a separate interactive test.
+
+The compute case explicitly requests `Standard_D2_v3`. Check regional capacity and AML quota before execution.
+The test checks the deployed bundle versions, exact ARM IDs, TRE ownership tags, private subnet, disabled public IP and assigned user.
+It waits for the compute to reach `Running`. It removes compute before the service and workspace, and checks TRE and ARM removal.
+The parent case checks successful private AML workspace provisioning and removal.
+These ARM checks follow the [compute response contract](https://learn.microsoft.com/en-us/rest/api/azureml/compute/get).
+
+The bundle job sets a 270-minute absolute deadline before container startup, with 120 minutes reserved for cleanup.
+Cleanup runs in reverse dependency order and divides the remaining time among owned resources.
+Local runs start the same budget when the case begins. Failed provisioning and verification still trigger bounded cleanup.
+Missing prerequisites and failed assertions fail the case. They do not count as skipped or passing coverage.
+
+These cases do not prove notebook execution, interactive user access, prior-version upgrades or deletion of every dependent Azure artefact.
+The compute bundle defines no custom actions. Retain these limits in each bundle's evidence record.
+
+### Databricks selection
+
+Select `tre-shared-service-databricks-private-auth` for the authentication service lifecycle.
+Select `tre-service-databricks` for its authentication prerequisite, a new base workspace and the private Databricks service.
+The branch workflow already publishes and registers both bundles. It completes smoke tests before starting the selected bundle job.
+Use one test process and one writer in a dedicated environment.
+Do not run these cases alongside smoke fixtures, other bundle tests, workspace deployments or manual resource changes.
+
+Both cases require AzureCloud, matching Azure and authentication tenants, and the existing CI Azure identity.
+Preflight requires no TRE workspaces, no authentication service and no records other than SOA in the core Databricks private DNS zone.
+It checks core resource ownership and the required network/DNS resources before creating anything.
+The workspace-service case also requires the checkout version of the deployed firewall bundle and complete endpoint data for the core region.
+The checks use the actual core resource group location. Configured workspace IDs are not reused.
+
+The authentication private endpoint is shared by workspaces in the same region and private DNS zone.
+Deleting it can break their browser sign-in. See [Databricks Private Link concepts](https://learn.microsoft.com/en-us/azure/databricks/security/network/concepts/private-link).
+The tests create and remove only owned resources. They recheck isolation before authentication removal and retain it if dependent cleanup fails.
+These checks do not provide an atomic lock against another writer. Clean up a failed isolated run before trying again.
+
+The tests compare registered and deployed versions with the checkout. ARM checks cover resource identity, ownership tags,
+private access, managed identity, injected subnets, private endpoints and their DNS configuration.
+Cleanup checks TRE removal and the declared ARM resources. The workspace-service case also checks removal of its firewall rule collections.
+The service pipeline upgrades its parent VNet and changes the shared firewall, which is why it requires exclusive use.
+The total deadline is 270 minutes, including a 120-minute cleanup reserve. The workflow starts that deadline before container setup.
+
+Browser sign-in, private DNS reachability, cluster and notebook execution, user access and previous-version upgrades remain unproven.
+Neither bundle defines custom actions. Endpoint completeness checks do not establish that every regional endpoint is current.
+Switzerland North's previously empty storage and Event Hubs lists are corrected using the
+[documented regional endpoints](https://learn.microsoft.com/en-us/azure/databricks/resources/ip-domain-region).
+The current DBFS storage name contains only the last four characters of the service ID, so a global name collision can still prevent deployment.
+
 ### Certificate and Nexus selection
 
 Select `tre-shared-service-certs` to install, uninstall and reinstall the certificate shared service with the same hostname and certificate name.
