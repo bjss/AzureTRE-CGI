@@ -119,6 +119,54 @@ CNAB spec defines actions that Porter [implements](https://porter.sh/author-bund
 Furthermore, Porter provides a set of [mixins](https://porter.sh/mixins/) - analogous to the concrete actions in GitHub workflows and tasks in Azure DevOps pipelines - which simplify and reduce the development cost when implementing deployment logic. For example, Terraform mixin installs the required tools and provides a clean step in the pipeline to execute Terraform deployments. [Exec mixin](https://porter.sh/mixins/exec/) allows running any command or script; especially useful, if no suitable mixin for a specific technology is available. Implementing custom mixins is possible too.
 <!-- markdownlint-enable MD013 -->
 
+### Repeated messages
+
+Service Bus can give the same message to more than one worker. The resource processor runs each step once:
+
+1. The `workspacequeue` queue keeps a session lock for 5 minutes. While a worker runs a step, it renews the lock every minute. If a renewal fails, the worker tries again until the lock expires, and logs each failure.
+1. Before Porter starts, the worker gets a 60-second lease on the blob `rp-executions/<resource ID>` in the management storage account. It renews the lease every 15 seconds. If another worker holds the lease, the worker keeps its session and tries again every 30 seconds.
+   When it gets the lease, it renews the session lock. If the session is lost, the worker does not run Porter, because another worker can have the message.
+1. The blob holds a record of the last step for the resource. If the record shows that the same step finished, the worker does not run Porter. It reads the outputs again and sends the recorded status.
+1. Each status message of a Porter run has an `executionId`. After a step has a final status, the API ignores a status from another run, a later status from the same run and a final status that it already saved.
+1. If the API wrote the final status itself, for example after a failed send of the next step, the first run of the step replaces it. An uninstall keeps its earlier rule for a final step.
+1. An upgrade does not install a deleted resource again. The resource processor sends `updating_failed` if the last successful action of the Porter installation was an uninstall. Without this check, `porter installations apply` runs the install action.
+   An upgrade can still repair a failed install, also an install that failed before Porter wrote its record.
+
+A status message without `executionId` comes from a resource processor before version 0.13.16, or it is the failed status after a storage access error. The API keeps the earlier rules for it. An API before version 0.29.0 ignores the field. So you can deploy the API and the resource processor in any order.
+
+The resource processor now needs the management storage account for each step. If the account refuses access (HTTP 401 or 403), the resource processor sends the failed status for the step. A Terraform backend in the same account failed in the same way before this change. For other storage errors, Service Bus delivers the message again.
+
+For local debugging, your identity needs the Storage Blob Data Contributor role on the management storage account.
+
+To test a lost session lock, add the key `"test_skip_session_lock_renewal": "true"` to the `RP_BUNDLE_VALUES` JSON object and deploy the core. Remove the key after the test.
+While Porter runs, the resource processor then does not renew the session lock, so Service Bus gives a step that takes more than 5 minutes to another worker.
+Do not use this setting in production.
+
+### Messages that the API did not send
+
+The API sends the message of the first step of each request immediately after it writes the operation to Cosmos DB. The same write adds a `pendingDispatch` entry to the operation document, and the API removes the entry after the send. The API does not show this entry in its responses.
+
+If the API stops between the write and the send, the entry stays. When the API starts and every 5 minutes, the deployment status updater reads the entries that are older than 5 minutes:
+
+1. One API instance claims each entry with the etag of the operation document. The other instances leave the entry.
+1. If the step has a status from the resource processor, the resource processor has the message. The updater removes the entry.
+1. If a later request for the same resource exists, for example a delete, the updater does not send the message. A cascade request of a parent with a step for the resource also counts.
+   The first step of a cascade is for a child resource, so a later request for that child also counts.
+   The updater sets the step and the operation to the failed status. It does not change the resource, because the later request owns its status.
+1. If the step has no status, the updater builds the message again from Cosmos DB and sends it with the message ID `<operation ID>:<step ID>`. Then it removes the entry.
+1. If an install or an update sets a sensitive property, the first message has the real value, and Cosmos DB keeps `REDACTED`.
+   The operation write records this in the entry, and the updater cannot build such a message again.
+   It sets the step and the operation to the failed status, with a message that asks the user to send the request again with the sensitive values if the status does not change.
+   The API does not keep the new value of a sensitive property, and an update that sends `REDACTED` keeps the earlier value.
+   Other first messages have the same values as Cosmos DB, so the updater sends them with the same values as the first send.
+1. If the updater cannot build the message, it sets the step and the operation to the failed status with the error text.
+
+In the last two cases, the updater also sets the resource of the request to the failed status. A first step on another resource, for example the firewall, did not run, so that resource keeps its status.
+
+A second copy of a message is safe, because the resource processor runs each step once. The entry stays if the API sent the message but stopped before it removed the entry. If the resource processor then sends a status for a step that the updater set to failed, the API saves that status. An uninstall keeps its earlier rule for a final step.
+
+The status message of a step stays on the `deploymentstatus` queue until the API has sent the message of the next step. So a stop of the API during a pipeline does not need this entry.
+
 ### Porter Azure plugin
 
 Resource Processor uses [Porter Azure plugin](https://github.com/getporter/azure-plugins) to access secrets in Azure Key Vault.
