@@ -132,7 +132,11 @@ try {
         $changed = [Text.Encoding]::UTF8.GetBytes("Changed after submission $ProbeId`n")
         $blobUrl = Get-BlobUrl $uri $BlobName
         $accepted = 0
+        $attempted = 0
+        # The Run Command can start late. The test needs to know that the writes came during the handover.
+        $startDelay = [int][Math]::Max(0, [Math]::Floor(([DateTime]::UtcNow - $start).TotalSeconds))
         while (([DateTime]::UtcNow - $start).TotalSeconds -lt $TamperSeconds) {
+            $attempted++
             if ((Send-Blob $blobUrl 'PUT' $changed) -eq 201) { $accepted++ }
             Start-Sleep -Milliseconds 500
         }
@@ -144,10 +148,13 @@ try {
                 add = Send-Blob (Get-BlobUrl $uri "added-$BlobName") 'PUT' $changed
                 delete = Send-Blob $blobUrl 'DELETE' $null
             }
-            $open = @($final.Values | Where-Object { $_ -ge 200 -and $_ -lt 300 }).Count -gt 0
+            # 0 means no HTTP answer, for example a timeout. Try again, as for an accepted write.
+            $open = @($final.Values | Where-Object { $_ -eq 0 -or ($_ -ge 200 -and $_ -lt 300) }).Count -gt 0
             if ($open) { Start-Sleep -Seconds 15 }
         } while ($open -and [DateTime]::UtcNow -lt $deadline)
         $result.accepted_writes = $accepted
+        $result.attempted_writes = $attempted
+        $result.start_delay_seconds = $startDelay
         $result.final = $final
     } else {
         if ($ContainerUrl) { throw 'Read probes must not receive a container URL' }
