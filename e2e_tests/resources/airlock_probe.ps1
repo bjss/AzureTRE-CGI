@@ -1,0 +1,191 @@
+param(
+    [Parameter(Mandatory)][ValidateSet('upload', 'read', 'tamper')][string]$Phase,
+    [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$ProbeId,
+    [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$')][string]$BlobName,
+    [Parameter(Mandatory)][string]$ContentBase64,
+    [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedSha256,
+    [ValidatePattern('^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)?$')][string]$StartAt = '',
+    [string]$ContainerUrl
+)
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$stage = 'parameters'
+$response = $null
+$stream = $null
+$sha = $null
+$TamperSeconds = 120
+
+function Assert-DraftUrl {
+    # The SAS is supplied as a protected Run Command parameter, never in source.
+    $uri = [Uri]$ContainerUrl
+    if (
+        $uri.Scheme -cne 'https' -or
+        $uri.Authority -cnotmatch '^[a-z0-9]{3,24}\.blob\.core\.windows\.net$' -or
+        $uri.AbsolutePath -cnotmatch '^/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$' -or
+        $uri.AbsolutePath.Contains('--') -or
+        $uri.Query -notmatch '(^\?|&)sig=[^&]+' -or
+        $uri.Fragment -ne '' -or $ContainerUrl -match '\s'
+    ) { throw 'Invalid container URL' }
+    $script:stage = 'private-dns'
+    $addresses = [System.Net.Dns]::GetHostAddresses($uri.DnsSafeHost)
+    if ($addresses.Count -eq 0) { throw 'No blob address' }
+    foreach ($address in $addresses) {
+        $parts = $address.GetAddressBytes()
+        $private = $parts.Length -eq 4 -and (
+            $parts[0] -eq 10 -or
+            ($parts[0] -eq 172 -and $parts[1] -ge 16 -and $parts[1] -le 31) -or
+            ($parts[0] -eq 192 -and $parts[1] -eq 168)
+        )
+        if (-not $private) { throw 'Blob DNS is not private' }
+    }
+    return $uri
+}
+
+function Get-BlobUrl([Uri]$Uri, [string]$Name) {
+    return $Uri.GetLeftPart([UriPartial]::Path) + '/' + $Name + $Uri.Query
+}
+
+function Send-Blob([string]$Url, [string]$Method, [byte[]]$Content) {
+    # Return the HTTP status. A tamper attempt that Azure refuses is an expected result.
+    $attempt = [System.Net.HttpWebRequest]::Create($Url)
+    $attempt.Method = $Method
+    $attempt.AllowAutoRedirect = $false
+    $attempt.Timeout = 30000
+    $attempt.ReadWriteTimeout = 30000
+    $attempt.Headers['x-ms-version'] = '2021-12-02'
+    $answer = $null
+    $upload = $null
+    try {
+        if ($Method -eq 'PUT') {
+            $attempt.ContentType = 'application/octet-stream'
+            $attempt.ContentLength = $Content.Length
+            $attempt.Headers['x-ms-blob-type'] = 'BlockBlob'
+            $upload = $attempt.GetRequestStream()
+            $upload.Write($Content, 0, $Content.Length)
+            $upload.Dispose()
+            $upload = $null
+        }
+        $answer = $attempt.GetResponse()
+        return [int]$answer.StatusCode
+    } catch [System.Net.WebException] {
+        $answer = $_.Exception.Response
+        if ($null -eq $answer) { return 0 }
+        return [int]$answer.StatusCode
+    } finally {
+        if ($null -ne $upload) { $upload.Dispose() }
+        if ($null -ne $answer) { $answer.Dispose() }
+    }
+}
+
+try {
+    if ($BlobName.EndsWith('.') -or $BlobName -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)') {
+        throw 'Invalid Windows file name'
+    }
+    $bytes = [Convert]::FromBase64String($ContentBase64)
+    if ($bytes.Length -eq 0 -or $bytes.Length -gt 16384) { throw 'Invalid synthetic content size' }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant()
+    if ($hash -cne $ExpectedSha256) { throw 'Input content hash mismatch' }
+    $result = [ordered]@{phase = $Phase; probe = $ProbeId; sha256 = $hash}
+    if ($Phase -eq 'upload') {
+        $uri = Assert-DraftUrl
+        $stage = 'upload'
+        $blobUrl = Get-BlobUrl $uri $BlobName
+        $deadline = [DateTime]::UtcNow.AddMinutes(5)
+        do {
+            $retry = $false
+            try {
+                $request = [System.Net.HttpWebRequest]::Create($blobUrl)
+                $request.Method = 'PUT'
+                $request.AllowAutoRedirect = $false
+                $request.Timeout = 30000
+                $request.ReadWriteTimeout = 30000
+                $request.ContentType = 'application/octet-stream'
+                $request.ContentLength = $bytes.Length
+                $request.Headers['x-ms-version'] = '2021-12-02'
+                $request.Headers['x-ms-blob-type'] = 'BlockBlob'
+                $stream = $request.GetRequestStream()
+                $stream.Write($bytes, 0, $bytes.Length)
+                $stream.Dispose()
+                $stream = $null
+                $response = $request.GetResponse()
+                if ([int]$response.StatusCode -ne 201) { throw 'Unexpected upload status' }
+            } catch [System.Net.WebException] {
+                $response = $_.Exception.Response
+                # Retry only the draft-container creation race. Do not retry access failures.
+                $retry = $null -ne $response -and [int]$response.StatusCode -eq 404 -and
+                    $response.Headers['x-ms-error-code'] -ceq 'ContainerNotFound'
+                if (-not $retry -or [DateTime]::UtcNow -ge $deadline) { throw 'Blob upload failed' }
+            } finally {
+                if ($null -ne $stream) { $stream.Dispose(); $stream = $null }
+                if ($null -ne $response) { $response.Dispose(); $response = $null }
+            }
+            if ($retry) { Start-Sleep -Seconds 10 }
+        } while ($retry)
+    } elseif ($Phase -eq 'tamper') {
+        $uri = Assert-DraftUrl
+        $stage = 'tamper'
+        if (-not $StartAt) { throw 'A tamper probe needs a start time' }
+        # The test submits the request before this time, so each attempt comes after the submission.
+        $start = [DateTime]::Parse($StartAt).ToUniversalTime()
+        while ([DateTime]::UtcNow -lt $start) { Start-Sleep -Milliseconds 200 }
+        $changed = [Text.Encoding]::UTF8.GetBytes("Changed after submission $ProbeId`n")
+        $blobUrl = Get-BlobUrl $uri $BlobName
+        $accepted = 0
+        $attempted = 0
+        # The Run Command can start late. The test needs to know that the writes came during the handover.
+        $startDelay = [int][Math]::Max(0, [Math]::Floor(([DateTime]::UtcNow - $start).TotalSeconds))
+        while (([DateTime]::UtcNow - $start).TotalSeconds -lt $TamperSeconds) {
+            $attempted++
+            if ((Send-Blob $blobUrl 'PUT' $changed) -eq 201) { $accepted++ }
+            Start-Sleep -Milliseconds 500
+        }
+        # After the handover, the old SAS must not change, add or delete any data.
+        $deadline = [DateTime]::UtcNow.AddMinutes(10)
+        do {
+            $final = [ordered]@{
+                overwrite = Send-Blob $blobUrl 'PUT' $changed
+                add = Send-Blob (Get-BlobUrl $uri "added-$BlobName") 'PUT' $changed
+                delete = Send-Blob $blobUrl 'DELETE' $null
+            }
+            # 0 means no HTTP answer, for example a timeout. Try again, as for an accepted write.
+            $open = @($final.Values | Where-Object { $_ -eq 0 -or ($_ -ge 200 -and $_ -lt 300) }).Count -gt 0
+            if ($open) { Start-Sleep -Seconds 15 }
+        } while ($open -and [DateTime]::UtcNow -lt $deadline)
+        $result.accepted_writes = $accepted
+        $result.attempted_writes = $attempted
+        $result.start_delay_seconds = $startDelay
+        $result.final = $final
+    } else {
+        if ($ContainerUrl) { throw 'Read probes must not receive a container URL' }
+        $stage = 'review-file'
+        $folder = 'C:\Users\Public\Desktop\ReviewData'
+        $file = Join-Path $folder $BlobName
+        # Inspect the copy made by the review-VM bundle. Do not download a replacement.
+        if (-not [System.IO.File]::Exists($file)) { throw 'Review file is missing' }
+        $fileInfo = Get-Item -LiteralPath $file
+        if (($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Review file is a link' }
+        if ($fileInfo.Length -ne $bytes.Length) { throw 'Review content size mismatch' }
+        $actual = [System.IO.File]::ReadAllBytes($file)
+        $hash = [BitConverter]::ToString($sha.ComputeHash($actual)).Replace('-', '').ToLowerInvariant()
+        if ($hash -cne $ExpectedSha256) { throw 'Review content hash mismatch' }
+        $stage = 'review-list'
+        # The review copy must hold only the submitted file.
+        $names = @(Get-ChildItem -LiteralPath $folder -Recurse -Force | ForEach-Object { $_.Name })
+        if ($names.Count -ne 1 -or $names[0] -cne $BlobName) { throw 'Review data has other files' }
+        $result.sha256 = $hash
+    }
+    Write-Output ('AIRLOCK_PROBE_RESULT=' + ($result | ConvertTo-Json -Compress))
+} catch {
+    # Do not emit exception text, request URLs, SAS tokens or response bodies.
+    Write-Output "AIRLOCK_PROBE_FAILED=$stage"
+    exit 1
+} finally {
+    if ($null -ne $stream) { $stream.Dispose() }
+    if ($null -ne $response) { $response.Dispose() }
+    if ($null -ne $sha) { $sha.Dispose() }
+    $ContainerUrl = $null
+    $blobUrl = $null
+    $uri = $null
+    $request = $null
+}
