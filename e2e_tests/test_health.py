@@ -20,7 +20,9 @@ from e2e_tests.resources.health_probe import (
     role_access,
     run_probe,
 )
-from e2e_tests.resources.resource import get_resource, post_resource
+from e2e_tests.helpers import get_auth_header, get_full_endpoint
+from e2e_tests.resources.deployment import check_deployment, install_done
+from e2e_tests.resources.resource import disable_and_delete_resource, get_resource, post_resource, wait_for
 from e2e_tests.resources.sql_lifecycle import sql_lifecycle
 from e2e_tests.resources.sql_probe import arm_client, COMPUTE_API, validate_vm
 
@@ -63,6 +65,34 @@ async def zone_records(arm, endpoint_id):
     }
 
 
+async def install_without_services(workspace_path, token, verify):
+    # Validation only: the bundle stops an install without FHIR and DICOM before it changes a resource.
+    payload = {
+        "templateName": strings.HEALTH_SERVICE,
+        "properties": {
+            "display_name": "Health without services",
+            "description": "Validation only",
+            "deploy_fhir": False,
+            "deploy_dicom": False,
+        },
+    }
+    async with AsyncClient(verify=verify, timeout=30.0) as client:
+        response = await client.post(
+            get_full_endpoint(f"/api{workspace_path}/workspace-services"), headers=get_auth_header(token), json=payload
+        )
+        assert response.status_code == 202, response.text
+        path = response.json()["operation"]["resourcePath"]
+        operation = response.headers["Location"]
+        state = await wait_for(install_done, client, operation, token, [])
+        _, message, _ = await check_deployment(client, operation, token)
+    words = " ".join(message.replace("\u2502", " ").split())
+    LOGGER.info("Validation only: an install without services ended in %s", state)
+    assert state == strings.RESOURCE_STATUS_DEPLOYMENT_FAILED
+    assert "Deploy FHIR, DICOM or both" in words, words[:500]
+    await disable_and_delete_resource(f"/api{path}", token, verify, allow_failed_disable=True)
+    LOGGER.info("Validation only: the API deleted the service without FHIR and DICOM")
+
+
 async def update_health(health_path, token, verify, properties):
     health = (await get_resource(f"/api{health_path}", token, verify))["workspaceService"]
     start = time.monotonic()
@@ -86,6 +116,7 @@ async def test_private_fhir_access_and_dicom_update(verify):
         token = await get_workspace_owner_token(workspace_id, verify)
         workspace = (await get_resource(f"/api{workspace_path}", token, verify))["workspace"]
         assert workspace["properties"].get("workspace_owners_group_id"), "The workspace has no owners group"
+        await install_without_services(workspace_path, token, verify)
         health_path, health_id = await resources.create(
             HEALTH_PAYLOAD, f"/api{workspace_path}/workspace-services", token
         )
