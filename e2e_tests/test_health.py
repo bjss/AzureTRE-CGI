@@ -185,7 +185,7 @@ async def test_private_fhir_access_and_dicom_update(verify):
 
             # Validation only: an update that removes FHIR and an update that adds FHIR to a service with DICOM.
             hosts = {
-                "workspace": f"hs{suffix}.",
+                "workspace": f"hs{suffix}-workspace.",
                 "fhir": f"hs{suffix}-fhir{suffix}.",
                 "dicom": f"hs{suffix}-dicom{suffix}.",
             }
