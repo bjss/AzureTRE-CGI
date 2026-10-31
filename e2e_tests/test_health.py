@@ -4,6 +4,7 @@ import asyncio
 from functools import partial
 import logging
 import os
+import time
 from uuid import uuid4
 
 from httpx import AsyncClient
@@ -51,6 +52,25 @@ VM_PAYLOAD = {
         },
     },
 }
+
+
+async def zone_records(arm, endpoint_id):
+    # Validation only: the zone group lists the record sets that Azure wrote for each zone.
+    group = await arm.request("GET", f"{endpoint_id}/privateDnsZoneGroups/private-dns-zone-group", NETWORK_API)
+    return {
+        config["name"]: sorted(record.get("fqdn", "") for record in config["properties"].get("recordSets", []))
+        for config in group["properties"]["privateDnsZoneConfigs"]
+    }
+
+
+async def update_health(health_path, token, verify, properties):
+    health = (await get_resource(f"/api{health_path}", token, verify))["workspaceService"]
+    start = time.monotonic()
+    async with asyncio.timeout(60 * 60):
+        await post_resource(
+            {"properties": properties}, f"/api{health_path}", token, verify, method="PATCH", etag=health["_etag"]
+        )
+    LOGGER.info("Validation only: the update %s took %d seconds", properties, time.monotonic() - start)
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -131,3 +151,39 @@ async def test_private_fhir_access_and_dicom_update(verify):
             LOGGER.info("Health public responses: %s, public network access: %s", public, network)
             assert public == dict.fromkeys(public, PUBLIC_BLOCKED), f"Health services answer public requests: {public}"
             assert network == dict.fromkeys(network, "Disabled"), f"Health services allow public access: {network}"
+
+            # Validation only: an update that removes FHIR and an update that adds FHIR to a service with DICOM.
+            hosts = {
+                "workspace": f"hs{suffix}.",
+                "fhir": f"hs{suffix}-fhir{suffix}.",
+                "dicom": f"hs{suffix}-dicom{suffix}.",
+            }
+
+            def present(records):
+                fqdns = [fqdn for zone in records.values() for fqdn in zone]
+                return {name: any(fqdn.startswith(prefix) for fqdn in fqdns) for name, prefix in hosts.items()}
+
+            LOGGER.info(
+                "Validation only: zone records before the FHIR changes: %s", await zone_records(arm, endpoint_id)
+            )
+            await update_health(health_path, token, verify, {"deploy_fhir": False})
+            records = await zone_records(arm, endpoint_id)
+            LOGGER.info("Validation only: zone records after the FHIR removal: %s", records)
+            # A record of the deleted FHIR service has no effect, so only the other records must exist.
+            assert present(records)["workspace"] and present(records)["dicom"], records
+            endpoint_now = await arm.request("GET", endpoint_id, NETWORK_API)
+            assert endpoint_now["properties"]["resourceGuid"] == endpoint["properties"]["resourceGuid"]
+
+            await update_health(health_path, token, verify, {"deploy_fhir": True})
+            records = await zone_records(arm, endpoint_id)
+            LOGGER.info("Validation only: zone records after the FHIR add: %s", records)
+            assert present(records) == {"workspace": True, "fhir": True, "dicom": True}, records
+            endpoint_now = await arm.request("GET", endpoint_id, NETWORK_API)
+            assert endpoint_now["properties"]["resourceGuid"] == endpoint["properties"]["resourceGuid"]
+            fhir = await arm.request("GET", fhir_id, HEALTH_API)
+            assert fhir["properties"]["provisioningState"] == "Succeeded"
+            new_probe = partial(run_probe, arm, azure_vm_id, vm["location"], fhir_url=fhir_url, probe_id=uuid4().hex)
+            await new_probe(phase="access")
+            async with role_access(arm, fhir_id, FHIR_DATA_CONTRIBUTOR, vm["identity"]["principalId"], subscription_id):
+                await new_probe(phase="write", dicom_url=dicom_url)
+            LOGGER.info("Validation only: FHIR and DICOM are private after FHIR was removed and added again")
