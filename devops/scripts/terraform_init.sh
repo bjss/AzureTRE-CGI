@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Source this helper before initialising a management Terraform backend.
+# Source this helper before initialising a Terraform backend in the management storage account.
 # Retry recognised probe, workspace-listing and state-read permission failures.
 
 retry_with_backoff() {
@@ -170,11 +170,14 @@ bootstrap_state_is_absent() {
   return 0
 }
 
+# Usage: init_terraform [bootstrap_state_key [terraform init arguments...]]
+# Give an empty key to send init arguments without the bootstrap state check.
 init_terraform() {
   local bootstrap_state_key="${1:-}"
   local terraform_output
   local status
-  if terraform_output=$(terraform init -input=false -backend=true -reconfigure -no-color 2>&1); then
+  (( $# == 0 )) || shift
+  if terraform_output=$(terraform init -input=false -backend=true -reconfigure -no-color "$@" 2>&1); then
     printf '%s\n' "$terraform_output"
     return 0
   else

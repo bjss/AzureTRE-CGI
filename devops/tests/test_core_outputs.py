@@ -41,6 +41,7 @@ class CoreOutputTests(unittest.TestCase):
             "core/terraform/write_outputs.sh",
             "core/terraform/json-to-env.sh",
             "devops/scripts/terraform_wrapper.sh",
+            "devops/scripts/terraform_init.sh",
             "devops/scripts/load_env.sh",
             "devops/scripts/load_and_validate_env.sh",
             "devops/scripts/construct_tre_url.sh",
