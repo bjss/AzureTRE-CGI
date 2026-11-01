@@ -233,6 +233,30 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertIn("test_shared_services.py::test_create_certs_nexus_shared_service", collected)
         self.assertNotIn("test_shared_services.py::test_create_certificate_shared_service", collected)
 
+    def test_an_unavailable_bundle_fails_with_its_coverage_gap(self):
+        # No bundle in the map is unavailable now, so the test changes one entry of the real map.
+        catalog = run_bundle.load_catalog()
+        catalog[SQL] = {**catalog[SQL], "tests": [], "unavailable_reason": "No case yet (#0000)"}
+        with tempfile.TemporaryDirectory() as folder, patch.object(run_bundle, "load_catalog", return_value=catalog):
+            with self.assertRaisesRegex(ValueError, r"Bundle case is unavailable: No case yet \(#0000\)"):
+                run_bundle.selection(SQL)
+            report = Path(folder) / "report.json"
+            with patch.dict(os.environ, {"TEST_BUNDLE_REQUEST_FILE": ""}):
+                self.assertEqual(run_bundle.main(["--bundle", SQL, "--validate-only", "--report", str(report)]), 2)
+            evidence = json.loads(report.read_text())
+        self.assertEqual(evidence["status"], "selection_error")
+        self.assertIn("#0000", evidence["error"])
+
+    def test_the_map_needs_either_cases_or_an_unavailable_reason(self):
+        coverage = json.loads(run_bundle.CATALOG.read_text())
+        coverage["bundles"][SQL]["unavailable_reason"] = "Both are set (#0000)"
+        with tempfile.TemporaryDirectory() as folder:
+            changed = Path(folder) / "bundle_coverage.json"
+            changed.write_text(json.dumps(coverage))
+            with patch.object(run_bundle, "CATALOG", changed):
+                with self.assertRaisesRegex(ValueError, "Declare either executable cases or an unavailable reason"):
+                    run_bundle.load_catalog()
+
     def test_openai_selects_the_guarded_case_and_reports_remaining_coverage(self):
         result, report = self.run_selector("--bundle", "tre-workspace-service-openai", "--collect-only")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -131,6 +131,7 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.wrong_owner = False
         self.wrong_template = False
         self.wrong_version = False
+        self.wrong_registered = False
         self.fail_read = False
         self.fail_upload = False
         self.fail_deletion = False
@@ -147,6 +148,10 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         },
                     }
                 }
+            if "/user-resource-templates/" in endpoint:
+                name = endpoint.rsplit("/", 1)[1]
+                version = export.load_catalog()[name]["source_version"]
+                return {"name": name, "version": "old" if self.wrong_registered else version}
             resource_id = endpoint.rsplit("/", 1)[1]
             template = (
                 export.REVIEW_TEMPLATE if resource_id == REVIEW else export.strings.GUACAMOLE_WINDOWS_USER_RESOURCE
@@ -210,6 +215,8 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 while "submit" not in self.events:
                     await asyncio.sleep(0)
                 self.assertGreater(kwargs["start_at"], self.submitted_at)
+                # The probe gets its start time in whole seconds.
+                self.assertEqual(kwargs["start_at"].microsecond, 0)
                 return {
                     "accepted_writes": 0,
                     "attempted_writes": self.tamper_attempts,
@@ -274,12 +281,15 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings["airlock_review_config"]["import"], {"existing": "preserved"})
         self.assertEqual(settings["airlock_review_config"]["export"]["export_vm_workspace_service_id"], SERVICE)
         self.assertEqual(self.patch_workspace.await_args.args[2], "admin")
-        self.assertEqual(
-            self.probe.await_args_list[0].kwargs["content"], self.probe.await_args_list[1].kwargs["content"]
-        )
+        calls = {call.kwargs["phase"]: call.kwargs for call in self.probe.await_args_list}
+        for phase in ("tamper", "read"):
+            with self.subTest(phase=phase):
+                self.assertEqual(calls[phase]["blob_name"], calls["upload"]["blob_name"])
+                self.assertEqual(calls[phase]["content"], calls["upload"]["content"])
+        self.assertEqual(calls["tamper"]["container_url"], calls["upload"]["container_url"])
 
-    async def test_a_tamper_probe_without_writes_in_the_handover_fails_before_review(self):
-        for attempts, delay, message in ((0, 0, "sent no write"), (200, 60, "started 60 s late")):
+    async def test_a_tamper_probe_without_writes_in_time_fails_before_review(self):
+        for attempts, delay, message in ((0, 0, "sent no write"), (200, 60, "started 60 s late. The limit is 30 s")):
             with self.subTest(attempts=attempts, delay=delay):
                 self.events.clear()
                 self.tamper_attempts, self.tamper_delay = attempts, delay
@@ -287,12 +297,37 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     await export.test_airlock_export_review_vm_flow(True)
                 self.assertNotIn("review", self.events)
 
-    async def test_an_old_draft_sas_that_still_writes_after_the_handover_fails_before_review(self):
+    async def test_an_old_draft_sas_that_still_writes_after_the_submit_fails_before_review(self):
         self.tamper_final = {"overwrite": 201, "add": 404, "delete": 404}
-        with self.assertRaisesRegex(AssertionError, "still changes data after the handover"):
+        with self.assertRaisesRegex(AssertionError, "still changes data after the submit"):
             await export.test_airlock_export_review_vm_flow(True)
         self.assertNotIn("review", self.events)
         self.assertNotIn("approve", self.events)
+
+    async def test_a_submit_inside_the_clock_margin_fails_before_review(self):
+        # The test lead is 2 seconds, so a margin of 10 seconds puts the end of the submit inside the margin.
+        with patch.object(export, "TAMPER_CLOCK_MARGIN_SECONDS", 10):
+            with self.assertRaisesRegex(AssertionError, "less than 10 s before the planned start"):
+                await export.test_airlock_export_review_vm_flow(True)
+        self.assertNotIn("review", self.events)
+
+    async def test_an_answer_that_is_not_a_refusal_fails_before_review(self):
+        # A server error or no HTTP answer does not show that the old SAS lost access.
+        for code in (0, 500, 503, 400):
+            with self.subTest(code=code):
+                self.events.clear()
+                self.tamper_final = {"overwrite": 404, "add": code, "delete": 409}
+                with self.assertRaisesRegex(AssertionError, "got no refusal from the storage"):
+                    await export.test_airlock_export_review_vm_flow(True)
+                self.assertNotIn("review", self.events)
+
+    async def test_a_registered_vm_version_that_differs_stops_before_any_resource(self):
+        self.wrong_registered = True
+        with self.assertRaisesRegex(ValueError, "Register the checkout version of tre-service-guacamole-windowsvm"):
+            await export.test_airlock_export_review_vm_flow(True)
+        # The check comes before Nexus, the workspace and the VMs.
+        self.assertEqual(self.events, [])
+        self.create_workspace.assert_not_awaited()
 
     async def test_failed_upload_never_submits_and_cleans_owned_resources(self):
         self.fail_upload = True
@@ -460,6 +495,30 @@ class ApprovedCopyTests(unittest.IsolatedAsyncioTestCase):
             await export.assert_approved_copy("/endpoint", "token", True, "a.txt", hashlib.sha256(content).hexdigest())
         self.assertNotIn("secret-sas-value", "\n".join(logs.output))
         self.assertEqual(logging.getLogger("httpx").level, logging.NOTSET)
+
+    async def test_a_failed_approved_copy_check_keeps_the_sas_out_of_the_failure_report(self):
+        import _pytest._code
+        import httpx
+
+        transport = httpx.MockTransport(lambda request: httpx.Response(403))
+        signature = os.urandom(16).hex()
+        link = {"containerUrl": f"https://stalairlocktre.blob.core.windows.net/{REQUEST}?sv=2024&sig={signature}"}
+        with (
+            patch.object(export, "get_request", AsyncMock(return_value=link)),
+            patch.object(export, "AsyncClient", lambda **kwargs: httpx.AsyncClient(transport=transport, **kwargs)),
+        ):
+            try:
+                await export.assert_approved_copy("/endpoint", "token", True, "a.txt", "hash")
+            except AssertionError as error:
+                # pytest makes this report for the job log and the JUnit file. Only the frames of the case count,
+                # because this test has the signature in its own variables.
+                info = _pytest._code.ExceptionInfo.from_exception(error)
+                info.traceback = info.traceback.filter(lambda entry: Path(entry.path) == Path(export.__file__))
+                report = str(info.getrepr(funcargs=True, showlocals=True, style="long"))
+            else:
+                self.fail("A refused listing must fail the check")
+        self.assertIn("Listing the approved export failed with HTTP 403", report)
+        self.assertNotIn(signature, report)
 
     async def test_the_approved_copy_must_hold_the_submitted_file_only(self):
         import hashlib
