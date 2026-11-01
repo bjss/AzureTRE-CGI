@@ -12,10 +12,13 @@ from resources.workspace import get_workspace_auth_details
 from resources import strings as resource_strings
 from helpers import get_admin_token, get_template
 from e2e_tests.resources.nexus import nexus_prerequisites
+from e2e_tests.sas_log_filter import mask_sas_in_httpx_logs
 from e2e_tests.timeouts import async_test_timeout, cleanup_deadline
 
 
 LOGGER = logging.getLogger(__name__)
+# httpx logs each request URL at INFO level. Mask the SAS values in these lines for all E2E tests.
+mask_sas_in_httpx_logs()
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 CLEANUP_TIMEOUT_SECONDS = 60 * 60
 _TEARDOWN_ITEM = pytest.StashKey[pytest.Item]()
