@@ -47,9 +47,10 @@ The core deploy reimages the resource processor instances after each change of t
 The deploy runs `core/terraform/resource_processor/vmss_porter/reimage_instances.sh` for the reimage. A busy instance is in a state such as "Updating", "Creating" or "Deleting". The script does these steps:
 
 1. It waits up to 5 minutes until no instance is busy. If an instance stays busy or is in the state "Failed", the script replaces all instances and does not reimage them.
-1. It reimages all instances, and waits up to 12 minutes until all instances are in the state "Succeeded". If an instance stays busy or goes to the state "Failed", the script replaces this instance.
+1. It reimages all instances, and waits up to 12 minutes until Azure ends the reimage. Then it reads the state of each instance. If an instance is not in the state "Succeeded", the script replaces this instance.
 1. To replace instances, the script deletes them. Then it scales the scale set back to its capacity. A new instance uses the current model of the scale set, so it gets the new custom data.
 1. If an instance is not in the state "Succeeded" 10 minutes after the start of the replace, the deploy fails with a message that names the scale set.
+1. If the reimage fails or does not end in 12 minutes, but all instances are in the state "Succeeded", the deploy fails and does not replace the instances. Look for the Azure CLI error in the deploy log.
 
 If the deploy fails with this message, repair the scale set manually:
 

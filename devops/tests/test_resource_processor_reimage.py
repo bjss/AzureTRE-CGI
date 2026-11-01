@@ -7,20 +7,25 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
 MODULE = Path(__file__).resolve().parents[2] / "core/terraform/resource_processor/vmss_porter"
 SCRIPT = MODULE / "reimage_instances.sh"
 LOGIN_LIFETIME_SECONDS = 40 * 60
+HANG = "hang"
 
 # The mocked "az" returns scripted instance states. Each action (reimage, delete-instances and scale)
-# starts a new list of states, and the last item of a list repeats.
+# starts a new list of states, and the last item of a list repeats. The item "error" makes the read fail.
+# The reimage ends with the exit code "reimage_exit". With "hang", the reimage does not end: under the
+# mocked "timeout" it returns 200 at once, and under the real "timeout" it waits until "timeout" stops it.
 MOCK_AZ = r"""
 import json
 import os
 from pathlib import Path
 import sys
+import time
 
 root = Path(os.environ["MOCK_ROOT"])
 config = json.loads((root / "config.json").read_text())
@@ -28,7 +33,8 @@ state_file = root / "state.json"
 state = json.loads(state_file.read_text()) if state_file.exists() else {"phase": "start", "index": 0}
 args = sys.argv[1:]
 with (root / "calls.jsonl").open("a") as log:
-    log.write(json.dumps({"clock": int((root / "clock").read_text()), "args": args}) + "\n")
+    entry = {"clock": int((root / "clock").read_text()), "args": args, "timeout": os.environ.get("MOCK_TIMEOUT")}
+    log.write(json.dumps(entry) + "\n")
 
 
 def option(name):
@@ -49,10 +55,20 @@ if option("--name") == "vmss-mock" and option("--resource-group") == "rg-mock":
         states = config[state["phase"]]
         current = states[min(state["index"], len(states) - 1)]
         state["index"] += 1
+        if current == "error":
+            finish(1, "ERROR: AADSTS700024: Client assertion is not within its valid time range.")
         finish(output="\n".join(instance_id + "\t" + value for instance_id, value in current))
     if action == "show" and tsv and option("--query") == "sku.capacity":
         finish(output=str(config["capacity"]))
-    if action in ("reimage", "delete-instances", "scale") and "--no-wait" in args:
+    if action == "reimage" and "--no-wait" not in args:
+        state["phase"], state["index"] = action, 0
+        if config["reimage_exit"] == "hang":
+            if "MOCK_TIMEOUT" not in os.environ:
+                state_file.write_text(json.dumps(state))
+                time.sleep(30)
+            finish(200)
+        finish(config["reimage_exit"], "ERROR: (VMStartTimedOut) mocked reimage error" if config["reimage_exit"] else "")
+    if action in ("delete-instances", "scale") and "--no-wait" in args:
         state["phase"], state["index"] = action, 0
         finish()
 finish(99, "Unexpected mocked command: " + repr(args))
@@ -62,6 +78,19 @@ finish(99, "Unexpected mocked command: " + repr(args))
 # So the tests use the default time limits, and they do not wait.
 MOCK_SLEEP = '#!/bin/bash\necho $(($(<"$MOCK_ROOT/clock") + $1)) >"$MOCK_ROOT/clock"\n'
 MOCK_DATE = '#!/bin/bash\n[ "$*" = "+%s" ] || exit 99\necho $((1800000000 + $(<"$MOCK_ROOT/clock")))\n'
+# The mocked "timeout" runs the command. If the mocked "az" hangs (exit code 200), it moves the clock
+# forward by the time limit and returns 124, as the real "timeout" does.
+MOCK_TIMEOUT = """#!/bin/bash
+limit=$1
+shift
+status=0
+MOCK_TIMEOUT=$limit "$@" || status=$?
+if [ "$status" -eq 200 ]; then
+  echo $(($(<"$MOCK_ROOT/clock") + limit)) >"$MOCK_ROOT/clock"
+  exit 124
+fi
+exit "$status"
+"""
 
 ONE_GOOD = [["0", "Succeeded"]]
 
@@ -71,7 +100,8 @@ class ReimageInstancesTests(unittest.TestCase):
         config = {
             "capacity": 1,
             "start": [ONE_GOOD],
-            "reimage": [[["0", "Updating"]], ONE_GOOD],
+            "reimage_exit": 0,
+            "reimage": [ONE_GOOD],
             "delete-instances": [[["0", "Deleting"]], []],
             "scale": [[["1", "Creating"]], [["1", "Succeeded"]]],
             **scenario,
@@ -82,7 +112,7 @@ class ReimageInstancesTests(unittest.TestCase):
             (root / "clock").write_text("0")
             mocks = {"az": f"#!{sys.executable} -S\n" + MOCK_AZ}
             if fake_clock:
-                mocks.update(sleep=MOCK_SLEEP, date=MOCK_DATE)
+                mocks.update(sleep=MOCK_SLEEP, date=MOCK_DATE, timeout=MOCK_TIMEOUT)
             for name, content in mocks.items():
                 executable = root / name
                 executable.write_text(content)
@@ -100,23 +130,23 @@ class ReimageInstancesTests(unittest.TestCase):
             calls_file = root / "calls.jsonl"
             calls = [json.loads(line) for line in calls_file.read_text().splitlines()] if calls_file.exists() else []
             self.clock = int((root / "clock").read_text())
-        self.az_calls = [(call["clock"], call["args"]) for call in calls]
+        self.az_calls = [(call["clock"], call["args"], call["timeout"]) for call in calls]
         self.output = result.stdout + result.stderr
         return result
 
     def actions(self):
-        return [args[1] for _, args in self.az_calls]
+        return [args[1] for _, args, _ in self.az_calls]
 
     def action_call(self, action):
-        matches = [(clock, args) for clock, args in self.az_calls if args[1] == action]
+        matches = [call for call in self.az_calls if call[1][1] == action]
         self.assertEqual(len(matches), 1, self.output)
         return matches[0]
 
     def assert_replaced(self, instance_ids, capacity, at_clock):
-        clock, args = self.action_call("delete-instances")
+        clock, args, _ = self.action_call("delete-instances")
         self.assertEqual(clock, at_clock)
         self.assertEqual(args[args.index("--instance-ids") + 1 : args.index("--no-wait")], instance_ids)
-        _, args = self.action_call("scale")
+        _, args, _ = self.action_call("scale")
         self.assertEqual(args[args.index("--new-capacity") + 1], str(capacity))
 
     def assert_repair_message(self, result):
@@ -125,17 +155,20 @@ class ReimageInstancesTests(unittest.TestCase):
         self.assertIn("scale set vmss-mock in resource group rg-mock", result.stderr)
         self.assertIn("docs/troubleshooting-faq/troubleshooting-rp.md", result.stderr)
 
-    def test_normal_reimage_does_not_replace(self):
+    def test_normal_reimage_waits_for_azure_and_does_not_replace(self):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, self.output)
-        self.assertEqual(self.actions(), ["list-instances", "reimage", "list-instances", "list-instances"])
+        self.assertEqual(self.actions(), ["list-instances", "reimage", "list-instances"])
+        _, args, limit = self.action_call("reimage")
+        self.assertNotIn("--no-wait", args)
+        self.assertEqual(limit, "720")
         self.assertIn("The reimage is complete.", result.stdout)
-        self.assertEqual(self.clock, 40)
+        self.assertEqual(self.clock, 0)
 
     def test_busy_instance_before_reimage_gets_time_to_finish(self):
         result = self.run_script(start=[[["0", "Updating"]]] * 3 + [ONE_GOOD])
         self.assertEqual(result.returncode, 0, self.output)
-        clock, _ = self.action_call("reimage")
+        clock, _, _ = self.action_call("reimage")
         self.assertEqual(clock, 60)
         self.assertNotIn("delete-instances", self.actions())
 
@@ -156,23 +189,53 @@ class ReimageInstancesTests(unittest.TestCase):
         self.assertNotIn("reimage", self.actions())
         self.assert_replaced(["0", "1"], 2, at_clock=0)
 
-    def test_instance_stuck_after_reimage_is_replaced_when_the_wait_ends(self):
-        result = self.run_script(reimage=[[["0", "Updating"]]])
-        self.assertEqual(result.returncode, 0, self.output)
-        self.assertEqual(self.actions().count("reimage"), 1)
-        self.assert_replaced(["0"], 1, at_clock=720)
-        self.assertIn("The time limit of 720 seconds ended.", result.stdout)
+    def test_instance_not_succeeded_after_reimage_is_replaced(self):
+        cases = [
+            (HANG, "Updating", 720, "did not end in the time limit of 720 seconds"),
+            (1, "Failed", 0, "ended with exit code 1"),
+            (0, "Updating", 0, "ended with exit code 0"),
+        ]
+        for reimage_exit, state, at_clock, message in cases:
+            with self.subTest(reimage_exit=reimage_exit, state=state):
+                result = self.run_script(reimage_exit=reimage_exit, reimage=[[["0", state]]])
+                self.assertEqual(result.returncode, 0, self.output)
+                self.assertEqual(self.actions().count("reimage"), 1)
+                self.assert_replaced(["0"], 1, at_clock=at_clock)
+                self.assertIn(message, result.stdout)
+                self.assertIn("The replace is complete.", result.stdout)
 
     def test_only_instances_that_fail_the_reimage_are_replaced(self):
         result = self.run_script(
             capacity=2,
             start=[[["0", "Succeeded"], ["1", "Succeeded"]]],
-            reimage=[[["0", "Updating"], ["1", "Updating"]], [["0", "Succeeded"], ["1", "Failed"]]],
+            reimage_exit=1,
+            reimage=[[["0", "Succeeded"], ["1", "Failed"]]],
             **{"delete-instances": [[["0", "Succeeded"]]]},
             scale=[[["0", "Succeeded"], ["2", "Succeeded"]]],
         )
         self.assertEqual(result.returncode, 0, self.output)
-        self.assert_replaced(["1"], 2, at_clock=40)
+        self.assert_replaced(["1"], 2, at_clock=0)
+
+    def test_reimage_error_with_all_instances_succeeded_fails_without_replace(self):
+        cases = [
+            (1, "The reimage ended with exit code 1."),
+            (HANG, "The reimage did not end in the time limit of 720 seconds."),
+        ]
+        for reimage_exit, message in cases:
+            with self.subTest(reimage_exit=reimage_exit):
+                result = self.run_script(reimage_exit=reimage_exit)
+                self.assert_repair_message(result)
+                self.assertIn(message, result.stderr)
+                self.assertIn("does not replace them", result.stderr)
+                self.assertEqual(self.actions(), ["list-instances", "reimage", "list-instances"])
+
+    def test_read_failure_after_reimage_error_stops_at_once(self):
+        for reimage_exit in (1, HANG):
+            with self.subTest(reimage_exit=reimage_exit):
+                result = self.run_script(reimage_exit=reimage_exit, reimage=["error"])
+                self.assert_repair_message(result)
+                self.assertIn("Could not read the instances of the scale set.", result.stderr)
+                self.assertEqual(self.actions(), ["list-instances", "reimage", "list-instances"])
 
     def test_replace_without_succeeded_instances_fails_with_repair_message(self):
         cases = {
@@ -183,16 +246,18 @@ class ReimageInstancesTests(unittest.TestCase):
         }
         for name, scenario in cases.items():
             with self.subTest(name):
-                result = self.run_script(reimage=[[["0", "Failed"]]], **scenario)
+                result = self.run_script(reimage_exit=1, reimage=[[["0", "Failed"]]], **scenario)
                 self.assert_repair_message(result)
+                self.assertIn("ended with exit code 1", result.stdout)
                 self.assertEqual(self.actions().count("delete-instances"), 1)
-                self.assertLessEqual(self.clock, 20 + 600)
+                self.assertLessEqual(self.clock, 600)
 
     def test_worst_case_ends_before_the_login_expires(self):
-        # The instance becomes free at the end of the first wait, then stays stuck in the reimage,
-        # and Azure does not delete it.
+        # The instance becomes free at the end of the first wait. Then the reimage does not end,
+        # the instance stays busy, and Azure does not delete it.
         result = self.run_script(
             start=[[["0", "Updating"]]] * 15 + [ONE_GOOD],
+            reimage_exit=HANG,
             reimage=[[["0", "Updating"]]],
             **{"delete-instances": [[["0", "Deleting"]]]},
         )
@@ -201,7 +266,8 @@ class ReimageInstancesTests(unittest.TestCase):
         self.assertEqual(self.clock, 300 + 720 + 600)
         self.assertLess(self.clock, LOGIN_LIFETIME_SECONDS)
 
-    def test_real_clock_with_small_time_limits(self):
+    def test_real_timeout_stops_a_reimage_that_does_not_end(self):
+        started = time.monotonic()
         result = self.run_script(
             fake_clock=False,
             environment={
@@ -210,11 +276,13 @@ class ReimageInstancesTests(unittest.TestCase):
                 "REIMAGE_REPLACE_WAIT_SECONDS": "5",
                 "REIMAGE_POLL_SECONDS": "1",
             },
+            reimage_exit=HANG,
             reimage=[[["0", "Updating"]]],
             **{"delete-instances": [[]]},
         )
         self.assertEqual(result.returncode, 0, self.output)
-        self.assertEqual(self.actions().count("reimage"), 1)
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertIn("did not end in the time limit of 1 seconds", result.stdout)
         self.assertEqual(self.actions().count("delete-instances"), 1)
         self.assertRegex(result.stdout, r"\[\d+s\] The replace is complete\.")
 

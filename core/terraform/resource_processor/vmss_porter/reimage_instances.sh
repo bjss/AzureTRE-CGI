@@ -13,9 +13,10 @@
 #   VMSS_NAME                     The name of the scale set. Required.
 #   RESOURCE_GROUP                The resource group of the scale set. Required.
 #   REIMAGE_IDLE_WAIT_SECONDS     Before the reimage, the maximum time to wait until no instance is busy. Default 300.
-#   REIMAGE_WAIT_SECONDS          The maximum time to wait for the reimage. Default 720.
+#   REIMAGE_WAIT_SECONDS          The time limit of the "az vmss reimage" command. Default 720.
 #   REIMAGE_REPLACE_WAIT_SECONDS  The maximum time to replace instances. Default 600.
-#   REIMAGE_POLL_SECONDS          The time between two checks of the instances. Default 20.
+#   REIMAGE_POLL_SECONDS          The time between two checks of the instances, in the wait before the
+#                                 reimage and in a replace. Default 20.
 #
 # With the default values, the worst case is 27 minutes, plus the time of the Azure CLI calls.
 # This is less than the time that the Azure CLI login of a CI deploy stays valid.
@@ -92,15 +93,11 @@ replace_complete() {
 }
 
 # Check the instances until the check function returns success, or until the time limit ends.
-# Arguments: the time limit in seconds, the time before the first check in seconds, and the check function.
+# Arguments: the time limit in seconds, and the check function.
 wait_until() {
-  local limit=$1 delay=$2 check=$3 deadline
+  local limit=$1 check=$2 deadline
   deadline=$(($(date +%s) + limit))
   while true; do
-    if [ "$delay" -gt 0 ]; then
-      sleep "$delay"
-    fi
-    delay=$POLL_SECONDS
     read_instances
     log "Instances: $(summary)"
     if "$check"; then
@@ -110,6 +107,7 @@ wait_until() {
       log "The time limit of ${limit} seconds ended."
       return 1
     fi
+    sleep "$POLL_SECONDS"
   done
 }
 
@@ -131,7 +129,7 @@ replace_instances() {
     --instance-ids "${ids[@]}" --no-wait --output none; then
     fail "The delete of instances ${DELETED_IDS} did not start."
   fi
-  if ! wait_until "$REPLACE_WAIT_SECONDS" 0 deleted_instances_gone; then
+  if ! wait_until "$REPLACE_WAIT_SECONDS" deleted_instances_gone; then
     fail "Azure did not delete instances ${DELETED_IDS} in time."
   fi
 
@@ -141,29 +139,41 @@ replace_instances() {
     fail "The scale of the scale set did not start."
   fi
   remaining=$((deadline - $(date +%s)))
-  if ! wait_until "$((remaining < 0 ? 0 : remaining))" 0 replace_complete || [ -n "$(not_succeeded_ids)" ]; then
+  if ! wait_until "$((remaining < 0 ? 0 : remaining))" replace_complete || [ -n "$(not_succeeded_ids)" ]; then
     fail "After the replace, not all instances are in the state Succeeded."
   fi
   log "The replace is complete. All instances are in the state Succeeded."
 }
 
 log "Check the instances of scale set ${VMSS_NAME} before the reimage."
-if ! wait_until "$IDLE_WAIT_SECONDS" 0 no_instance_busy || [ -n "$(not_succeeded_ids)" ]; then
+if ! wait_until "$IDLE_WAIT_SECONDS" no_instance_busy || [ -n "$(not_succeeded_ids)" ]; then
   log "An instance is busy or failed. Replace all instances, because no instance has the new custom data yet."
   replace_instances "$(all_ids)"
   exit 0
 fi
 
-log "Reimage all instances of scale set ${VMSS_NAME}."
-if ! az vmss reimage --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" --no-wait --output none; then
-  fail "The reimage did not start."
+log "Reimage all instances of scale set ${VMSS_NAME}. The time limit is ${REIMAGE_WAIT_SECONDS} seconds."
+# The Azure CLI waits until Azure ends the reimage operation. If the time limit ends first, "timeout"
+# stops the Azure CLI and returns exit code 124. The reimage operation can then continue in Azure.
+reimage_status=0
+timeout "$REIMAGE_WAIT_SECONDS" az vmss reimage --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
+  --output none || reimage_status=$?
+if [ "$reimage_status" -eq 124 ]; then
+  reimage_result="The reimage did not end in the time limit of ${REIMAGE_WAIT_SECONDS} seconds."
+else
+  reimage_result="The reimage ended with exit code ${reimage_status}."
 fi
-# Azure sets the instances to the state Updating when it accepts the reimage.
-# The first check comes one poll interval after the request.
-if wait_until "$REIMAGE_WAIT_SECONDS" "$POLL_SECONDS" no_instance_busy && [ -z "$(not_succeeded_ids)" ]; then
-  log "The reimage is complete. All instances are in the state Succeeded."
+log "$reimage_result"
+
+read_instances
+log "Instances: $(summary)"
+stuck_ids=$(not_succeeded_ids)
+if [ -n "$stuck_ids" ]; then
+  log "Instances ${stuck_ids} are not in the state Succeeded after the reimage. Replace them."
+  replace_instances "$stuck_ids"
   exit 0
 fi
-stuck_ids=$(not_succeeded_ids)
-log "Instances ${stuck_ids} did not complete the reimage. Replace them."
-replace_instances "$stuck_ids"
+if [ "$reimage_status" -ne 0 ]; then
+  fail "${reimage_result} All instances are in the state Succeeded, so the script does not replace them. Look for the Azure CLI error above."
+fi
+log "The reimage is complete. All instances are in the state Succeeded."
