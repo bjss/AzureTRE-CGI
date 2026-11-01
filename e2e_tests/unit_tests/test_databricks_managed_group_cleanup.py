@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLES = (
     ROOT / "templates/shared_services/databricks-auth/terraform/main.tf",
@@ -81,6 +83,7 @@ class ManagedGroupCleanupTests(unittest.TestCase):
         calls = [json.loads(line) for line in calls_file.read_text().splitlines()] if calls_file.exists() else []
         deletes = [call for call in calls if call[:2] == ["group", "delete"]]
         self.logins = [call for call in calls if call[:1] == ["login"]]
+        self.clouds = [call for call in calls if call[:2] == ["cloud", "set"]]
         return result, deletes, json.loads(state.read_text())
 
     def test_group_left_by_databricks_is_deleted(self):
@@ -131,6 +134,20 @@ class ManagedGroupCleanupTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.logins[0][:2], ["login", "--service-principal"])
                 self.assertIn("tenant", self.logins[0])
+
+    def test_sign_in_uses_the_cloud_of_the_bundle(self):
+        for path in BUNDLES:
+            with self.subTest(path=path.parent.parent.name):
+                result, _, _ = self.run_cleanup(path, group=False, env={"AZURE_ENVIRONMENT": "AzureUSGovernment"})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.clouds, [["cloud", "set", "--name", "AzureUSGovernment"]])
+                # Porter sets AZURE_ENVIRONMENT only for a declared parameter.
+                bundle = path.parent.parent
+                parameters = yaml.safe_load((bundle / "porter.yaml").read_text())["parameters"]
+                declared = next(item for item in parameters if item["name"] == "azure_environment")
+                self.assertEqual(declared.get("env", "AZURE_ENVIRONMENT"), "AZURE_ENVIRONMENT")
+                sources = json.loads((bundle / "parameters.json").read_text())["parameters"]
+                self.assertIn({"name": "azure_environment", "source": {"env": "AZURE_ENVIRONMENT"}}, sources)
 
     def test_group_managed_by_another_resource_stays_and_fails_the_destroy(self):
         for path in BUNDLES:
