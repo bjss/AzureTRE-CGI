@@ -213,7 +213,7 @@ elif command == "az":
         if not state["public"]:
             finish(1, "AuthorizationFailure")
         if operation == "show" and "--lease-id" not in args:
-            # The probe clean-up reads the lease state after a lease ID mismatch.
+            # The probe cleanup reads the lease state after a lease ID mismatch.
             operation = "lease_state"
         index = state["probe_calls"].get(operation, 0)
         state["probe_calls"][operation] = index + 1
@@ -597,7 +597,7 @@ class BlobReadinessChecks:
         self.assertEqual(self.commands("terraform"), [])
         self.assertEqual(self.sleeps(), [])
 
-    def test_lease_mismatch_after_denied_acquire_cleans_up_before_retry(self):
+    def assert_cleanup_after_lease_mismatch(self, lease_state, probe_lease_state=None):
         # A run on 2026-10-28 got this pair while the blob role propagated.
         result = self.run_readiness(
             lease_acquire_responses=[
@@ -608,13 +608,23 @@ class BlobReadinessChecks:
                 {"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"},
                 {"code": 0, "output": ""},
             ],
+            probe_lease_state=probe_lease_state,
         )
         self.assertEqual(result.returncode, 0, self.output)
-        self.assertIn("lease state after the lease ID mismatch: available", self.output)
+        self.assertIn(f"lease state after the lease ID mismatch: {lease_state}", self.output)
         self.assertEqual(self.commands("az", "storage", "blob", "lease", "break"), [])
         self.assertEqual(len(self.commands("az", "storage", "blob", "delete")), 2)
         self.assertEqual(self.sleeps(), [10])
         self.assertEqual(self.probe_state(), {})
+
+    def test_lease_mismatch_after_denied_acquire_cleans_up_before_retry(self):
+        self.assert_cleanup_after_lease_mismatch("available")
+
+    def test_lease_mismatch_on_an_expired_probe_lease_cleans_up_before_retry(self):
+        self.assert_cleanup_after_lease_mismatch("expired", probe_lease_state="expired")
+
+    def test_lease_mismatch_on_a_broken_probe_lease_cleans_up_before_retry(self):
+        self.assert_cleanup_after_lease_mismatch("broken", probe_lease_state="broken")
 
     def test_lease_mismatch_with_a_denied_lease_state_read_retries_the_release(self):
         # Azure can also deny the read while the blob role propagates.
@@ -652,7 +662,7 @@ class BlobReadinessChecks:
         self.assertEqual(self.commands("terraform"), [])
         self.assertEqual(self.sleeps(), [])
 
-    def test_lease_mismatch_with_an_unknown_lease_state_stops(self):
+    def test_lease_mismatch_with_a_breaking_lease_state_stops(self):
         result = self.run_readiness(
             lease_acquire_responses=[{"code": 1, "output": CLI_PERMISSION_ERROR}],
             lease_release_responses=[{"code": 1, "output": "LeaseIdMismatchWithLeaseOperation"}],

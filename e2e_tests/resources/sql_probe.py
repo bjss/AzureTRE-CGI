@@ -17,7 +17,7 @@ from e2e_tests.timeouts import cleanup_deadline
 
 
 ARM = "https://management.azure.com"
-# Resource Manager can answer a read with a short throttle or gateway error. Only a GET is safe to send again.
+# Resource Manager can answer a read with a short throttle or server error. Only a GET is safe to send again.
 RETRY_STATUSES = (429, 500, 502, 503, 504)
 SECRETS_USER = "4633458b-17de-408a-b874-0445c86b69e6"
 COMPUTE_API = "2023-03-01"
