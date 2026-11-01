@@ -53,6 +53,27 @@ class ProbeEvidenceTests(unittest.TestCase):
         pending["properties"]["instanceView"]["executionState"] = "Running"
         self.assertFalse(self.check_result(pending))
 
+    def test_a_failure_names_the_known_stage_only(self):
+        # The output of a failed command can hold other text. Only the stage names go to the CI log.
+        for output, stage in (
+            (f"{probe.FAILED}review-file-hash\n", "review-file-hash"),
+            (f"{probe.FAILED}tamper\n", "tamper"),
+            (f"{probe.FAILED}secret-value\n", "unknown"),
+            ("", "unknown"),
+        ):
+            failed = result()
+            failed["properties"]["instanceView"].update(executionState="Failed", exitCode=1, output=output)
+            with self.subTest(stage=stage), self.assertRaises(AssertionError) as caught:
+                self.check_result(failed)
+            self.assertEqual(str(caught.exception), f"Airlock probe failed: state=Failed, exitCode=1, stage={stage}")
+            self.assertNotIn("secret-value", str(caught.exception))
+
+    def test_a_non_zero_exit_after_success_names_its_stage(self):
+        failed = result()
+        failed["properties"]["instanceView"].update(exitCode=1, output=f"{probe.FAILED}upload\n")
+        with self.assertRaisesRegex(AssertionError, "stage=upload"):
+            self.check_result(failed)
+
     def test_failure_exit_error_or_terminal_status_cannot_pass(self):
         changes = (
             {"executionState": "Failed"},
@@ -274,6 +295,16 @@ class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
                     start_at=start,
                 )
         arm.request.assert_not_awaited()
+
+    def test_the_final_tamper_loop_and_the_test_use_the_same_refusal_codes(self):
+        import re
+
+        from e2e_tests import test_airlock_export_review as export
+
+        # The probe tries again until each final attempt gets one of these codes or the deadline passes.
+        loop = re.search(r"\$_ -notin ([0-9, ]+)\}", probe.SCRIPT.read_text())
+        self.assertIsNotNone(loop)
+        self.assertEqual(tuple(int(code) for code in loop.group(1).split(",")), export.REFUSAL_CODES)
 
     def test_tamper_evidence_needs_every_attempt_as_a_number(self):
         def check(**overrides):

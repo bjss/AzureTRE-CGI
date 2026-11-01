@@ -19,6 +19,19 @@ PROBE_TIMEOUT_SECONDS = 15 * 60
 TAMPER_TIMEOUT_SECONDS = 25 * 60
 TAMPER_ATTEMPTS = ("overwrite", "add", "delete")
 MARKER = "AIRLOCK_PROBE_RESULT="
+FAILED = "AIRLOCK_PROBE_FAILED="
+# The stages that the PowerShell probe reports. The test shows no other text from the VM.
+STAGES = (
+    "parameters",
+    "private-dns",
+    "upload",
+    "tamper",
+    "review-file-missing",
+    "review-file-link",
+    "review-file-size",
+    "review-file-hash",
+    "review-list",
+)
 
 
 def validate_parameters(vm_id, location, *, phase, probe_id, blob_name, content, container_url):
@@ -108,13 +121,21 @@ def probe_result(resource, *, phase, probe_id, expected_hash):
     properties = resource.get("properties", {})
     view = properties.get("instanceView", {})
     state = view.get("executionState", "")
-    if properties.get("provisioningState") in ("Failed", "Canceled") or state in ("Failed", "Canceled", "TimedOut"):
-        raise AssertionError("Airlock probe command failed")
+    output = view.get("output", "")
+    failed = properties.get("provisioningState") in ("Failed", "Canceled") or state in (
+        "Failed",
+        "Canceled",
+        "TimedOut",
+    )
+    if failed or (state == "Succeeded" and (type(view.get("exitCode")) is not int or view["exitCode"] != 0)):
+        lines = output.splitlines() if isinstance(output, str) else []
+        stages = [line[len(FAILED) :].strip() for line in lines if line.startswith(FAILED)]
+        stage = ",".join(name for name in stages if name in STAGES) or "unknown"
+        raise AssertionError(f"Airlock probe failed: state={state}, exitCode={view.get('exitCode')}, stage={stage}")
     if state != "Succeeded":
         return False
-    if type(view.get("exitCode")) is not int or view["exitCode"] != 0 or view.get("error"):
+    if view.get("error"):
         raise AssertionError("Airlock probe did not exit successfully")
-    output = view.get("output", "")
     lines = output.strip().splitlines() if isinstance(output, str) else []
     if len(lines) != 1 or not lines[0].startswith(MARKER):
         raise AssertionError("Airlock probe did not return exactly one result")

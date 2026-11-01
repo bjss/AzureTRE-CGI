@@ -133,14 +133,14 @@ try {
         $blobUrl = Get-BlobUrl $uri $BlobName
         $accepted = 0
         $attempted = 0
-        # The Run Command can start late. The test needs to know that the writes came during the handover.
+        # The Run Command can start late. The test needs to know when the writes started.
         $startDelay = [int][Math]::Max(0, [Math]::Floor(([DateTime]::UtcNow - $start).TotalSeconds))
         while (([DateTime]::UtcNow - $start).TotalSeconds -lt $TamperSeconds) {
             $attempted++
             if ((Send-Blob $blobUrl 'PUT' $changed) -eq 201) { $accepted++ }
             Start-Sleep -Milliseconds 500
         }
-        # After the handover, the old SAS must not change, add or delete any data.
+        # After the submit, the old SAS must not change, add or delete any data.
         $deadline = [DateTime]::UtcNow.AddMinutes(10)
         do {
             $final = [ordered]@{
@@ -148,8 +148,9 @@ try {
                 add = Send-Blob (Get-BlobUrl $uri "added-$BlobName") 'PUT' $changed
                 delete = Send-Blob $blobUrl 'DELETE' $null
             }
-            # 0 means no HTTP answer, for example a timeout. Try again, as for an accepted write.
-            $open = @($final.Values | Where-Object { $_ -eq 0 -or ($_ -ge 200 -and $_ -lt 300) }).Count -gt 0
+            # Only 403, 404 and 409 show that the old SAS lost access to the draft. Try again after any other
+            # answer, for example a timeout (0), a server error or an accepted write.
+            $open = @($final.Values | Where-Object { $_ -notin 403, 404, 409 }).Count -gt 0
             if ($open) { Start-Sleep -Seconds 15 }
         } while ($open -and [DateTime]::UtcNow -lt $deadline)
         $result.accepted_writes = $accepted
@@ -158,14 +159,17 @@ try {
         $result.final = $final
     } else {
         if ($ContainerUrl) { throw 'Read probes must not receive a container URL' }
-        $stage = 'review-file'
+        $stage = 'review-file-missing'
         $folder = 'C:\Users\Public\Desktop\ReviewData'
         $file = Join-Path $folder $BlobName
         # Inspect the copy made by the review-VM bundle. Do not download a replacement.
         if (-not [System.IO.File]::Exists($file)) { throw 'Review file is missing' }
+        $stage = 'review-file-link'
         $fileInfo = Get-Item -LiteralPath $file
         if (($fileInfo.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Review file is a link' }
+        $stage = 'review-file-size'
         if ($fileInfo.Length -ne $bytes.Length) { throw 'Review content size mismatch' }
+        $stage = 'review-file-hash'
         $actual = [System.IO.File]::ReadAllBytes($file)
         $hash = [BitConverter]::ToString($sha.ComputeHash($actual)).Replace('-', '').ToLowerInvariant()
         if ($hash -cne $ExpectedSha256) { throw 'Review content hash mismatch' }

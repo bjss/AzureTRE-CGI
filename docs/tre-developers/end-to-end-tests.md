@@ -182,16 +182,18 @@ The case creates a separate workspace, Guacamole service and minimal Windows upl
 It ignores configured workspace and service IDs and preserves any reused Nexus and certificate services.
 The upload VM sends one synthetic blob to the export draft through the workspace private endpoint.
 The SAS is a protected Run Command parameter. The probe does not print it.
-The submission fixes the content. Before the submit, the case starts a second probe on the upload VM with a start time.
-The case submits the request before that time, so each write of the probe comes after the submission.
+Before the submit, the case starts a second probe on the upload VM with a start time.
+The case submits the request about 15 seconds before that time. The submit must end at least 2 seconds before it.
 For up to 2 minutes the probe writes changed content through the old draft SAS. It counts the attempts and the writes that Azure accepts.
 The case fails if the probe sends no write, or if it starts more than 30 seconds after the planned time.
-It then tries an overwrite, a new blob and a delete through the same SAS. Each attempt must fail.
+It then tries an overwrite, a new blob and a delete through the same SAS. Each attempt must get HTTP 403, 404 or 409.
+The probe tries the three requests again for up to 10 minutes after any other answer.
+The Airlock processor copies the draft some seconds after the submit. So the writes of the probe come after that copy, and the case does not test writes during the copy.
 After the request reaches `in_review`, the case creates an export review VM in the same workspace.
 The review copy must hold only the submitted file with the submitted hash, also if a write after the submission passed.
 After the approval, the test runner lists and downloads the approved export through the API link. It must hold only the submitted file with the submitted hash.
 The case then waits for automatic VM deletion.
-Both VM bundle versions must match the checkout. The evidence report records their observed versions.
+Both VM bundle versions must match the checkout. The case reads the registered versions before it creates a resource. The evidence report records the deployed versions.
 Recovery cleanup cannot turn failed automatic deletion into a passing result.
 
 The bundle job sets a 270-minute absolute deadline before container startup.

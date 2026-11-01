@@ -43,8 +43,10 @@ LIFECYCLE_SECONDS = 270 * 60
 # The tamper probe starts this long after its Run Command, so the submit comes before its first write.
 TAMPER_LEAD_SECONDS = 150
 TAMPER_CLOCK_MARGIN_SECONDS = 2
-# The probe writes for 120 seconds. A later start can miss the handover.
+# The probe writes for 120 seconds. A later start can miss the first minutes after the submit.
 TAMPER_MAX_START_DELAY_SECONDS = 30
+# The storage refuses an old draft SAS with these codes after the processor deletes the draft.
+REFUSAL_CODES = (403, 404, 409)
 CLEANUP_RESERVE_SECONDS = 120 * 60
 REVIEW_TEMPLATE = "tre-service-guacamole-export-reviewvm"
 VM_PAYLOAD = {
@@ -160,6 +162,17 @@ async def export_resources(verify):
                 raise cancelled
 
 
+async def require_registered_vm_versions(verify):
+    """Stop before any resource exists if a registered VM bundle differs from this checkout."""
+    catalog = load_catalog()
+    token = await get_admin_token(verify)
+    for name in (strings.GUACAMOLE_WINDOWS_USER_RESOURCE, REVIEW_TEMPLATE):
+        endpoint = f"/api/workspace-service-templates/{strings.GUACAMOLE_SERVICE}/user-resource-templates/{name}"
+        template = await get_resource(endpoint, token, verify)
+        if template.get("name") != name or template.get("version") != catalog[name]["source_version"]:
+            raise ValueError(f"Register the checkout version of {name} before export review validation")
+
+
 async def owned_vm(arm, resource_path, template, workspace_id, service_id, token, verify):
     record = (await get_resource(f"/api{resource_path}", token, verify))["userResource"]
     assert record["templateName"] == template
@@ -191,10 +204,18 @@ def no_request_urls_in_the_log():
         httpx_logger.setLevel(level)
 
 
+class HiddenText(str):
+    """A value, such as a SAS, that the failure report of pytest shows as hidden."""
+
+    def __repr__(self):
+        return "'<hidden>'"
+
+
 async def assert_approved_copy(endpoint, token, verify, blob_name, expected_hash):
     """Download the approved export with its link and compare the file list and the content."""
-    link = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"]
-    base, sas = link.split("?", 1)
+    base, sas = (await get_request(endpoint + "/link", token, verify, 200))["containerUrl"].split("?", 1)
+    # pytest shows the arguments of each function in a failure report.
+    sas = HiddenText(sas)
     with no_request_urls_in_the_log():
         await read_approved_copy(base, sas, blob_name, expected_hash)
     LOGGER.info("The approved export has the submitted file only, with the submitted content")
@@ -215,6 +236,7 @@ async def read_approved_copy(base, sas, blob_name, expected_hash):
 @pytest.mark.export_review_validation
 @pytest.mark.nexus_required
 async def test_airlock_export_review_vm_flow(verify):
+    await require_registered_vm_versions(verify)
     async with export_resources(verify) as resources:
         # A separate workspace avoids changes to pre-created or import-test resources.
         workspace_path, workspace_id = await create_or_get_test_workspace(
@@ -284,7 +306,8 @@ async def test_airlock_export_review_vm_flow(verify):
             )
             await run_probe(arm, seed_vm, seed_location, phase="upload", container_url=container_url, **probe)
             expected_hash = hashlib.sha256(probe["content"].encode()).hexdigest()
-            # The submission fixes the content. Writes through the old draft SAS start just after it.
+            # The processor copy of the draft fixes the content some seconds after the submit. The writes through the
+            # old draft SAS start about 13 seconds after the submit, so they test the old SAS after that copy.
             # The probe gets StartAt in whole seconds, so the test uses the same rounded time.
             start_at = (datetime.now(timezone.utc) + timedelta(seconds=TAMPER_LEAD_SECONDS)).replace(
                 microsecond=0
@@ -305,7 +328,7 @@ async def test_airlock_export_review_vm_flow(verify):
                 submitted = await post_request(None, endpoint + "/submit", token, verify, 200)
                 # The margin covers a small difference between the clocks of the runner and the VM.
                 assert datetime.now(timezone.utc) < start_at - timedelta(seconds=TAMPER_CLOCK_MARGIN_SECONDS), (
-                    "The submit ended after the first tamper write"
+                    f"The submit ended less than {TAMPER_CLOCK_MARGIN_SECONDS} s before the planned start of the tamper writes"
                 )
                 evidence = await tamper
             finally:
@@ -321,12 +344,16 @@ async def test_airlock_export_review_vm_flow(verify):
                 evidence["start_delay_seconds"],
                 evidence["final"],
             )
-            assert evidence["attempted_writes"] > 0, "The tamper probe sent no write during the handover"
+            assert evidence["attempted_writes"] > 0, "The tamper probe sent no write through the old draft SAS"
             assert evidence["start_delay_seconds"] <= TAMPER_MAX_START_DELAY_SECONDS, (
-                f"The tamper probe started {evidence['start_delay_seconds']} s late, after the handover"
+                f"The tamper probe started {evidence['start_delay_seconds']} s late. "
+                f"The limit is {TAMPER_MAX_START_DELAY_SECONDS} s."
             )
-            assert all(code >= 400 for code in evidence["final"].values()), (
-                f"The old draft SAS still changes data after the handover: {evidence['final']}"
+            assert not any(200 <= code < 300 for code in evidence["final"].values()), (
+                f"The old draft SAS still changes data after the submit: {evidence['final']}"
+            )
+            assert all(code in REFUSAL_CODES for code in evidence["final"].values()), (
+                f"The old draft SAS got no refusal from the storage after the submit: {evidence['final']}"
             )
             async with asyncio.timeout(15 * 60):
                 await wait_for_status(airlock_strings.IN_REVIEW_STATUS, token, workspace_path, request_id, verify)
