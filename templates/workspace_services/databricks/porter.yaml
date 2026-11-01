@@ -48,6 +48,11 @@ parameters:
     env: ARM_ENVIRONMENT
     type: string
     default: "public"
+  - name: azure_environment
+    env: AZURE_ENVIRONMENT
+    type: string
+    default: "AzureCloud"
+    description: "Used by Azure CLI to set the Azure environment"
 
 outputs:
   - name: databricks_workspace_name
