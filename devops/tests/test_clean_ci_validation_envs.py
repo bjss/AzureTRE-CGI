@@ -101,6 +101,8 @@ elif command == "az":
         if config.get("group_show_error"):
             sys.exit(1)
         name = args[args.index("--name") + 1]
+        if "--query" in args:
+            print(config.get("delete_after", {}).get(name, ""))
         sys.exit(0 if any(row.split("\t")[0] == name for row in config["groups"]) else 3)
     elif config.get("real_destroy") and args[:3] == ["group", "lock", "list"]:
         if config.get("core_lock_list_error"):
@@ -113,7 +115,8 @@ elif command == "az":
     elif config.get("real_destroy") and (args[:2] == ["keyvault", "show"] or args[:4] == ["monitor", "log-analytics", "workspace", "show"]):
         sys.exit(3)
     elif args[:2] == ["group", "delete"]:
-        if "--name" in args and args[args.index("--name") + 1] in config.get("delete_errors", []):
+        name_flag = "--name" if "--name" in args else "--resource-group"
+        if args[args.index(name_flag) + 1] in config.get("delete_errors", []):
             sys.exit("Deletion failed")
     elif args[:2] != ["config", "set"]:
         sys.exit("Unexpected az command")
@@ -127,7 +130,10 @@ elif command == "git":
     else:
         sys.exit("Unexpected git command")
 elif command == "date":
-    print(2000000000 - config["age_hours"] * 3600 if "-d" in args else 2000000000)
+    if args == ["-u", "+%Y%m%d"]:
+        print("20330518")
+    else:
+        print(2000000000 - config["age_hours"] * 3600 if "-d" in args else 2000000000)
 elif command not in ("control_tre.sh", "destroy_env_no_terraform.sh"):
     sys.exit("Unexpected command")
 """
@@ -579,6 +585,59 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.deleted_environment_groups(), ["rg-tretest-mgmt"])
         self.assertFalse(any(call[:4] == ["az", "group", "lock", "list"] for call in self.calls))
+
+    def run_destroy_with_failed_workspace(self, **config):
+        if not self.config.get("real_destroy"):
+            self.use_real_destroy_helper()
+        self.config.update(
+            {
+                "groups": [
+                    "rg-tretest\trefs/pull/5085/merge",
+                    "rg-tretest-mgmt\trefs/pull/5085/merge",
+                    "rg-tretest-ws-abcd",
+                    "rg-tretest-ws-efgh",
+                ],
+                "open_prs": [],
+                "delete_errors": ["rg-tretest-ws-efgh"],
+                "delete_after": {},
+                "group_show_error": False,
+                **config,
+            }
+        )
+        result = self.run_cleanup()
+        # The failed group is the first one. The destroy still deletes the other groups.
+        self.assertEqual(
+            self.deleted_environment_groups(),
+            ["rg-tretest-ws-efgh", "rg-tretest-ws-abcd", "rg-tretest-mgmt", "rg-tretest"],
+        )
+        return result
+
+    def test_real_destroy_keeps_a_group_until_its_delete_date(self):
+        # Azure keeps a backup vault in soft delete, so the delete of its group fails until that date.
+        for delete_after in ("2033-05-18", "2033-06-01"):
+            with self.subTest(delete_after=delete_after):
+                result = self.run_destroy_with_failed_workspace(delete_after={"rg-tretest-ws-efgh": delete_after})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(
+                    f"Resource group rg-tretest-ws-efgh has the tag e2e_delete_after={delete_after}. "
+                    "The destroy keeps it on purpose.",
+                    result.stdout,
+                )
+                self.assertNotIn("Could not delete", result.stderr)
+
+    def test_real_destroy_continues_after_a_failed_group_and_fails_at_the_end(self):
+        cases = {
+            "no tag": {},
+            "earlier date": {"delete_after": {"rg-tretest-ws-efgh": "2033-05-17"}},
+            "invalid date": {"delete_after": {"rg-tretest-ws-efgh": "soon"}},
+            "tag read failure": {"delete_after": {"rg-tretest-ws-efgh": "2033-06-01"}, "group_show_error": True},
+        }
+        for name, config in cases.items():
+            with self.subTest(name):
+                result = self.run_destroy_with_failed_workspace(**config)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ERROR: Could not delete these resource groups: rg-tretest-ws-efgh", result.stderr)
+                self.assertNotIn("keeps it on purpose", result.stdout)
 
     def test_management_only_expired_pr_is_destroyed(self):
         self.config.update(groups=["rg-tretest-mgmt\trefs/pull/5085/merge"], age_hours=49)
