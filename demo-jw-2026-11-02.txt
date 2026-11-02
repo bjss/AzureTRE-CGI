@@ -1,0 +1,2 @@
+Demo environment for an attended test, started on 2026-11-02.
+This file only makes the PR comment bot deploy an environment.
