@@ -69,9 +69,15 @@ fi
 az account set --subscription "${self.input.subscription_id}"
 group="${self.input.managed_resource_group_name}"
 workspace="${self.input.workspace_id}"
-if az resource show --ids "$workspace" --output none 2>/dev/null; then
+if show_error=$(az resource show --ids "$workspace" --output none 2>&1); then
   echo "The Databricks workspace still exists, so its managed resource group stays"
   exit 0
+fi
+# Only a "not found" answer shows that the workspace is gone. Another error, for example a refused or throttled
+# request, stops the clean-up, so that the group stays.
+if ! grep -qE "ResourceNotFound|ResourceGroupNotFound" <<<"$show_error"; then
+  echo "Cannot read the Databricks workspace $workspace, so its managed resource group stays: $show_error" >&2
+  exit 1
 fi
 # A failed call stops the script here. Inside the test, set -e does not stop it.
 exists=$(az group exists --name "$group")

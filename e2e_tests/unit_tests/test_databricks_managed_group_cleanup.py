@@ -25,7 +25,9 @@ FAKE_AZ = """import json,os,sys
 args=sys.argv[1:]
 with open(os.environ['CALLS'],'a') as f:f.write(json.dumps(args)+'\\n')
 state=json.load(open(os.environ['STATE']))
-if args[:2]==['resource','show']:sys.exit(0 if state['workspace'] else 3)
+if args[:2]==['resource','show']:
+    if state['workspace']:sys.exit(0)
+    sys.stderr.write(state.get('show_error') or "(ResourceNotFound) The Resource 'Microsoft.Databricks/workspaces/x' was not found.");sys.exit(3)
 if args[:2]==['group','exists']:
     if state.get('exists_fails'):sys.exit(1)
     print('true' if state['group'] else 'false')
@@ -61,10 +63,20 @@ class ManagedGroupCleanupTests(unittest.TestCase):
         path.write_text("#!" + sys.executable + "\n" + FAKE_AZ)
         path.chmod(0o755)
 
-    def run_cleanup(self, path, *, workspace=False, group=True, managed_by=WORKSPACE, exists_fails=False, env=None):
+    def run_cleanup(
+        self, path, *, workspace=False, group=True, managed_by=WORKSPACE, exists_fails=False, show_error=None, env=None
+    ):
         state = self.folder / "state.json"
         state.write_text(
-            json.dumps({"workspace": workspace, "group": group, "managed_by": managed_by, "exists_fails": exists_fails})
+            json.dumps(
+                {
+                    "workspace": workspace,
+                    "group": group,
+                    "managed_by": managed_by,
+                    "exists_fails": exists_fails,
+                    "show_error": show_error,
+                }
+            )
         )
         calls_file = self.folder / "calls.jsonl"
         calls_file.unlink(missing_ok=True)
@@ -117,6 +129,28 @@ class ManagedGroupCleanupTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("Databricks deleted its managed resource group", result.stdout)
                 self.assertEqual(deletes, [])
+
+    def test_a_failed_workspace_lookup_fails_the_destroy(self):
+        # A refused or throttled lookup does not show that the workspace is gone, so the group must stay.
+        for path in BUNDLES:
+            for error in (
+                "(AuthorizationFailed) The client does not have authorization",
+                "(TooManyRequests) Retry later",
+            ):
+                with self.subTest(path=path.parent.parent.name, error=error):
+                    result, deletes, state = self.run_cleanup(path, show_error=error)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Cannot read the Databricks workspace", result.stderr)
+                    self.assertEqual(deletes, [])
+                    self.assertTrue(state["group"])
+
+    def test_a_missing_workspace_group_counts_as_a_deleted_workspace(self):
+        for path in BUNDLES:
+            with self.subTest(path=path.parent.parent.name):
+                error = "(ResourceGroupNotFound) Resource group 'rg-tre-svc-1234' could not be found."
+                result, deletes, _ = self.run_cleanup(path, show_error=error)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(deletes, [["group", "delete", "--name", GROUP, "--yes"]])
 
     def test_sign_in_uses_the_credentials_of_the_bundle(self):
         principal = {
