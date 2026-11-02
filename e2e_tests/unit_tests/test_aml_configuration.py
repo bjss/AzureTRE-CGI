@@ -210,6 +210,9 @@ class WorkflowPrerequisiteTests(unittest.TestCase):
         run = next(s for s in steps if s["name"] == "Run E2E Tests")
         self.assertIn("AML_VALIDATION_DEADLINE=${{ env.AML_VALIDATION_DEADLINE }}", run["with"]["COMMAND"])
         self.assertEqual(run["with"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}")
+        # A marker selection such as aml_validation runs the AML cases in the custom job, not in the bundle job.
+        custom = next(s for s in jobs["e2e_tests_custom"]["steps"] if s["name"] == "Run E2E Tests")
+        self.assertEqual(custom["with"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}")
         workflows = ROOT / ".github/workflows"
         secrets = yaml.safe_load((workflows / "deploy_tre_reusable.yml").read_text())[True]["workflow_call"]["secrets"]
         self.assertIs(secrets["TEST_AML_USER_OBJECT_ID"]["required"], False)
