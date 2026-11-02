@@ -132,6 +132,15 @@ describe('delegated deployment guard', () => {
   });
 });
 
+describe('deploy job order', () => {
+  test('the state migrations start after the UI deploy closes the state storage account', () => {
+    const jobs = workflow('deploy_tre_reusable.yml').jobs;
+    expect(jobs.deploy_shared_services.steps.map(step => step.with?.COMMAND)).toContain('make db-migrate');
+    expect(jobs.deploy_ui.steps.map(step => step.with?.COMMAND)).toContain('make build-and-deploy-ui');
+    expect(jobs.deploy_shared_services.needs).toContain('deploy_ui');
+  });
+});
+
 // Pin the repository, so that the result does not depend on the runner that runs the tests.
 function prepare(job, location, ref, output, prefix = '', repository = prefix ? 'contoso/AzureTRE' : 'microsoft/AzureTRE') {
   const step = job.steps.find(value => value.id === 'environment-id' || value.id === 'run-id');

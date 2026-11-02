@@ -158,9 +158,17 @@ resource "azurerm_linux_virtual_machine_scale_set" "vm_linux" {
 
 # CustomData (e.g. image tag to run) changes will only take affect after vmss instances are reimaged.
 # https://docs.microsoft.com/en-us/azure/virtual-machines/custom-data#can-i-update-custom-data-after-the-vm-has-been-created
+# Azure can update an instance at the same time, for example for an automatic OS image upgrade.
+# Then the instance can stay in the state "Updating". The script uses time limits, and it replaces
+# an instance that stays busy or fails, so that the deploy stops before the Azure CLI login expires.
 resource "terraform_data" "vm_linux_reimage" {
   provisioner "local-exec" {
-    command = "az vmss reimage --name ${azurerm_linux_virtual_machine_scale_set.vm_linux.name} --resource-group ${var.resource_group_name}"
+    interpreter = ["/bin/bash"]
+    command     = "${path.module}/reimage_instances.sh"
+    environment = {
+      VMSS_NAME      = azurerm_linux_virtual_machine_scale_set.vm_linux.name
+      RESOURCE_GROUP = var.resource_group_name
+    }
   }
 
   triggers_replace = [

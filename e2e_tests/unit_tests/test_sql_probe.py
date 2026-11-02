@@ -155,6 +155,69 @@ class ProbeRecoveryTests(unittest.IsolatedAsyncioTestCase):
         payload = arm.request.call_args_list[0].kwargs["body"]
         self.assertFalse(any("password" in p["name"].lower() for p in payload["properties"]["parameters"]))
 
+    async def test_arm_read_is_sent_again_after_a_gateway_error(self):
+        statuses = [504, 200]
+
+        def handle(request):
+            return Response(statuses.pop(0), json={"name": "vm"})
+
+        credential = Mock()
+        credential.get_token.return_value = SimpleNamespace(token="offline")
+        self.enterContext(patch.object(probe.asyncio, "sleep", AsyncMock()))
+        async with AsyncClient(transport=MockTransport(handle)) as client:
+            vm = await probe.ArmClient(client, credential).request("GET", VM_ID, probe.COMPUTE_API)
+        self.assertEqual(vm, {"name": "vm"})
+        self.assertEqual(statuses, [])
+
+    async def test_arm_write_is_not_sent_again_after_a_gateway_error(self):
+        calls = []
+
+        def handle(request):
+            calls.append(request.method)
+            return Response(504)
+
+        credential = Mock()
+        credential.get_token.return_value = SimpleNamespace(token="offline")
+        self.enterContext(patch.object(probe.asyncio, "sleep", AsyncMock()))
+        async with AsyncClient(transport=MockTransport(handle)) as client:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 504"):
+                await probe.ArmClient(client, credential).request("PUT", VM_ID, probe.COMPUTE_API, body={})
+        self.assertEqual(calls, ["PUT"])
+
+    async def test_arm_read_stops_after_three_sends(self):
+        calls = []
+
+        def handle(request):
+            calls.append(request.method)
+            return Response(429 if len(calls) == 1 else 503)
+
+        credential = Mock()
+        credential.get_token.return_value = SimpleNamespace(token="offline")
+        sleep = self.enterContext(patch.object(probe.asyncio, "sleep", AsyncMock()))
+        async with AsyncClient(transport=MockTransport(handle)) as client:
+            with self.assertRaisesRegex(RuntimeError, "HTTP 503"):
+                await probe.ArmClient(client, credential).request("GET", VM_ID, probe.COMPUTE_API)
+        self.assertEqual(calls, ["GET", "GET", "GET"])
+        self.assertEqual([c.args for c in sleep.await_args_list], [(10,), (20,)])
+
+    async def test_arm_read_is_sent_again_only_after_a_throttle_or_server_error(self):
+        credential = Mock()
+        credential.get_token.return_value = SimpleNamespace(token="offline")
+        self.enterContext(patch.object(probe.asyncio, "sleep", AsyncMock()))
+        for status, sends in ((429, 2), (500, 2), (502, 2), (503, 2), (504, 2), (400, 1), (409, 1)):
+            with self.subTest(status=status):
+                statuses = [status, 200]
+
+                def handle(request):
+                    return Response(statuses.pop(0), json={"name": "vm"})
+
+                async with AsyncClient(transport=MockTransport(handle)) as client:
+                    try:
+                        await probe.ArmClient(client, credential).request("GET", VM_ID, probe.COMPUTE_API)
+                    except RuntimeError as error:
+                        self.assertIn(f"HTTP {status}", str(error))
+                self.assertEqual(2 - len(statuses), sends)
+
     async def test_arm_deletion_waits_until_resource_is_gone(self):
         calls = []
 

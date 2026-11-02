@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 from ci_environment_id import ci_tags, environment_prefix, repository_owns, validate_ref
 from ci_cleanup_activity import branch_activity, mutation_allowed
@@ -114,23 +115,14 @@ def context():
 
 
 ACTIVE_RUN_STATUSES = frozenset(("in_progress", "queued", "pending", "waiting", "requested"))
+# GitHub can report a running job late, mostly while GitHub Actions is degraded.
+# Read the jobs again before the lock check refuses, for up to 2 minutes.
+OWNER_READS = 7
+OWNER_READ_DELAY = 20
 
 
-def verify_lock(ctx):
-    run = github(ctx, f"/actions/runs/{ctx['run_id']}")
-    # GitHub reports the whole run as pending while another matrix job waits for
-    # its reference group. The job and concurrency owner checks prove this lock.
-    require(
-        isinstance(run, dict)
-        and run.get("id") == ctx["run_id"]
-        and run.get("run_attempt") == ctx["attempt"]
-        and run.get("status") in ACTIVE_RUN_STATUSES
-        and run.get("path") == ".github/workflows/clean_validation_envs.yml"
-        and isinstance(run.get("repository"), dict)
-        and run["repository"].get("full_name") == ctx["repository"],
-        "The cleanup run or attempt does not match.",
-    )
-    expected_name = os.environ.get("CI_CLEANUP_JOB_NAME", "Clean " + ctx["ref"])
+def attempt_jobs(ctx):
+    """Read every job of the current run attempt."""
     jobs, total = {}, None
     for page in range(1, 12):
         data = github(ctx, f"/actions/runs/{ctx['run_id']}/attempts/{ctx['attempt']}/jobs?per_page=100&page={page}")
@@ -158,7 +150,37 @@ def verify_lock(ctx):
         require(len(data["jobs"]) == 100, "GitHub omitted cleanup jobs.")
     else:
         raise RecoveryError("Could not verify all cleanup jobs.")
-    owners = [job for job in jobs.values() if job["name"] == expected_name and job.get("status") == "in_progress"]
+    return jobs
+
+
+def verify_lock(ctx):
+    run = github(ctx, f"/actions/runs/{ctx['run_id']}")
+    # GitHub reports the whole run as pending while another matrix job waits for
+    # its reference group. The job and concurrency owner checks prove this lock.
+    require(
+        isinstance(run, dict)
+        and run.get("id") == ctx["run_id"]
+        and run.get("run_attempt") == ctx["attempt"]
+        and run.get("status") in ACTIVE_RUN_STATUSES
+        and run.get("path") == ".github/workflows/clean_validation_envs.yml"
+        and isinstance(run.get("repository"), dict)
+        and run["repository"].get("full_name") == ctx["repository"],
+        "The cleanup run or attempt does not match.",
+    )
+    expected_name = os.environ.get("CI_CLEANUP_JOB_NAME", "Clean " + ctx["ref"])
+    for read in range(1, OWNER_READS + 1):
+        named = [job for job in attempt_jobs(ctx).values() if job["name"] == expected_name]
+        owners = [job for job in named if job.get("status") == "in_progress"]
+        # Two owners are never a delay, so only a missing owner causes another read.
+        if owners or read == OWNER_READS:
+            break
+        statuses = ", ".join(sorted(str(job.get("status")) for job in named)) or "no job"
+        print(
+            f"GitHub does not report {expected_name} as in progress ({statuses}). "
+            f"Reading the jobs again in {OWNER_READ_DELAY} seconds ({read} of {OWNER_READS - 1}).",
+            file=sys.stderr,
+        )
+        time.sleep(OWNER_READ_DELAY)
     require(len(owners) == 1, "The current cleanup job is missing or ambiguous.")
     return verify_concurrency(ctx, job_id=owners[0]["id"])
 

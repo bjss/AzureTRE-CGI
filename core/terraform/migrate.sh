@@ -5,6 +5,9 @@ set -o pipefail
 set -o nounset
 # set -o xtrace
 
+# shellcheck disable=SC1091
+source ../../devops/scripts/terraform_init.sh
+
 get_resource_id() {
   local json_data="$1"
   local resource_addr="$2"
@@ -82,12 +85,17 @@ export ARM_USE_AZUREAD=true
 export ARM_USE_OIDC=true
 
 # These variables are loaded in for us
+# A new role on the state storage account can take some minutes to work.
+# Retry a permission failure that Terraform reports before it locks the state.
 # shellcheck disable=SC2154
-terraform init -input=false -backend=true -reconfigure \
+if ! retry_with_backoff init_terraform "" \
     -backend-config="resource_group_name=${TF_VAR_mgmt_resource_group_name}" \
     -backend-config="storage_account_name=${TF_VAR_mgmt_storage_account_name}" \
     -backend-config="container_name=${TF_VAR_terraform_state_container_name}" \
-    -backend-config="key=${TRE_ID}"
+    -backend-config="key=${TRE_ID}"; then
+  echo "ERROR: Terraform backend initialisation failed. See the error above." >&2
+  exit 1
+fi
 
 tf_state_list="$(terraform state list)"
 
@@ -168,11 +176,14 @@ echo "REMOVING STATE FOR FIREWALL..."
 pushd ../../templates/shared_services/firewall/terraform
 
 # shellcheck disable=SC1091
-terraform init -input=false -backend=true -reconfigure -upgrade \
+if ! retry_with_backoff init_terraform "" -upgrade \
     -backend-config="resource_group_name=${TF_VAR_mgmt_resource_group_name}" \
     -backend-config="storage_account_name=${TF_VAR_mgmt_storage_account_name}" \
     -backend-config="container_name=${TF_VAR_terraform_state_container_name}" \
-    -backend-config="key=${TRE_ID}-shared-service-firewall"
+    -backend-config="key=${TRE_ID}-shared-service-firewall"; then
+  echo "ERROR: Terraform backend initialisation of the firewall state failed. See the error above." >&2
+  exit 1
+fi
 
 tf_state_list="$(terraform state list)"
 
