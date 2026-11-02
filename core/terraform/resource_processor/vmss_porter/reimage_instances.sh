@@ -4,10 +4,11 @@
 # Azure can update an instance of this scale set at the same time as the deploy, for example for an
 # automatic OS image upgrade or an automatic repair. Then the instance can stay in the state
 # "Updating", and a plain "az vmss reimage" does not return before the Azure CLI login of the deploy
-# expires. So this script uses a time limit for each step. If an instance stays busy or fails, the
-# script replaces it: it deletes the instance and scales the scale set back to its capacity. A new
-# instance uses the current model of the scale set, so it gets the new custom data. Before the
-# reimage, the script replaces all instances, because no instance has the new custom data yet.
+# expires. So this script uses a time limit for each step and for each Azure CLI call. If an instance
+# stays busy or fails, the script replaces it: it deletes the instance and scales the scale set back
+# to its capacity. A new instance uses the current model of the scale set, so it gets the new custom
+# data. Before the reimage, the script replaces all instances, because no instance has the new custom
+# data yet.
 #
 # Environment:
 #   VMSS_NAME                     The name of the scale set. Required.
@@ -17,8 +18,18 @@
 #   REIMAGE_REPLACE_WAIT_SECONDS  The maximum time to replace instances. Default 600.
 #   REIMAGE_POLL_SECONDS          The time between two checks of the instances, in the wait before the
 #                                 reimage and in a replace. Default 20.
+#   REIMAGE_CALL_SECONDS          The time limit of each Azure CLI call other than the reimage. Default 60.
+#                                 In a wait, a read of the instances also stops at the end of the wait,
+#                                 but it gets at least 10 seconds. If a read in a wait fails, the next
+#                                 check reads the instances again.
 #
-# With the default values, the worst case is 27 minutes, plus the time of the Azure CLI calls.
+# A wait ends at most 10 seconds after its time limit. With the default values, the worst case is
+# 1770 seconds (29.5 minutes):
+#   310 seconds for the wait before the reimage.
+#   720 seconds for the reimage.
+#    60 seconds for the read after the reimage.
+#   680 seconds for the replace: the 600 seconds of the replace, 10 seconds for the last read of the
+#       delete wait, 60 seconds for the scale call, and 10 seconds for the last read after the scale.
 # This is less than the time that the Azure CLI login of a CI deploy stays valid.
 
 set -o errexit
@@ -31,12 +42,20 @@ IDLE_WAIT_SECONDS=${REIMAGE_IDLE_WAIT_SECONDS:-300}
 REIMAGE_WAIT_SECONDS=${REIMAGE_WAIT_SECONDS:-720}
 REPLACE_WAIT_SECONDS=${REIMAGE_REPLACE_WAIT_SECONDS:-600}
 POLL_SECONDS=${REIMAGE_POLL_SECONDS:-20}
-for value in "$IDLE_WAIT_SECONDS" "$REIMAGE_WAIT_SECONDS" "$REPLACE_WAIT_SECONDS" "$POLL_SECONDS"; do
+CALL_SECONDS=${REIMAGE_CALL_SECONDS:-60}
+for value in "$IDLE_WAIT_SECONDS" "$REIMAGE_WAIT_SECONDS" "$REPLACE_WAIT_SECONDS" "$POLL_SECONDS" "$CALL_SECONDS"; do
   if [[ ! $value =~ ^[0-9]+$ ]]; then
     echo "Set each REIMAGE_*_SECONDS value to a whole number of seconds." >&2
     exit 1
   fi
 done
+# With the time limit 0, "timeout" runs the command without a time limit.
+if [ "$REIMAGE_WAIT_SECONDS" -eq 0 ] || [ "$CALL_SECONDS" -eq 0 ]; then
+  echo "Set REIMAGE_WAIT_SECONDS and REIMAGE_CALL_SECONDS to 1 or more, because \"timeout 0\" has no time limit." >&2
+  exit 1
+fi
+# The shortest time limit of a read in a wait, so that the last read of a wait can end.
+MIN_READ_SECONDS=10
 
 START_TIME=$(date +%s)
 # The ID and the provisioning state of each instance, from the last check. One instance on each line.
@@ -56,11 +75,34 @@ fail() {
   exit 1
 }
 
-read_instances() {
-  if ! INSTANCES=$(az vmss list-instances --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
-    --query "[].[instanceId, provisioningState]" --output tsv); then
-    fail "Could not read the instances of the scale set."
+# Print the number of seconds until the given time, or 0 if the time is in the past.
+# Argument: the time, in seconds since the epoch.
+seconds_until() {
+  local remaining
+  remaining=$(($1 - $(date +%s)))
+  echo $((remaining < 0 ? 0 : remaining))
+}
+
+# Print why an Azure CLI call failed.
+# Arguments: the exit code of "timeout", and the time limit of the call in seconds.
+call_error() {
+  if [ "$1" -eq 124 ]; then
+    echo "The time limit of $2 seconds for the Azure CLI call ended."
+  else
+    echo "The Azure CLI call ended with exit code $1."
   fi
+}
+
+# Read the instances into INSTANCES. If the read fails, INSTANCES does not change.
+# Argument: the time limit of the read in seconds. The exit code is the exit code of "timeout".
+read_instances() {
+  local output status=0
+  output=$(timeout "$1" az vmss list-instances --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
+    --query "[].[instanceId, provisioningState]" --output tsv) || status=$?
+  if [ "$status" -eq 0 ]; then
+    INSTANCES=$output
+  fi
+  return "$status"
 }
 
 # Print the IDs of all instances, separated by spaces.
@@ -93,53 +135,73 @@ replace_complete() {
 }
 
 # Check the instances until the check function returns success, or until the time limit ends.
+# Each read stops at the end of the wait, but it gets at least MIN_READ_SECONDS. If a read fails,
+# the next check reads the instances again. If the last read fails, the script stops, because the
+# state of the instances is not known.
 # Arguments: the time limit in seconds, and the check function.
 wait_until() {
-  local limit=$1 check=$2 deadline
+  local limit=$1 check=$2 deadline remaining read_limit status
   deadline=$(($(date +%s) + limit))
   while true; do
-    read_instances
-    log "Instances: $(summary)"
-    if "$check"; then
-      return 0
+    remaining=$(seconds_until "$deadline")
+    read_limit=$((remaining > MIN_READ_SECONDS ? remaining : MIN_READ_SECONDS))
+    read_limit=$((read_limit < CALL_SECONDS ? read_limit : CALL_SECONDS))
+    status=0
+    read_instances "$read_limit" || status=$?
+    if [ "$status" -eq 0 ]; then
+      log "Instances: $(summary)"
+      if "$check"; then
+        return 0
+      fi
+    else
+      log "Could not read the instances of the scale set. $(call_error "$status" "$read_limit")"
     fi
-    if [ "$(date +%s)" -ge "$deadline" ]; then
+    remaining=$(seconds_until "$deadline")
+    if [ "$remaining" -eq 0 ]; then
       log "The time limit of ${limit} seconds ended."
+      if [ "$status" -ne 0 ]; then
+        fail "The last read of the instances failed, so the state of the instances is not known."
+      fi
       return 1
     fi
-    sleep "$POLL_SECONDS"
+    sleep $((remaining < POLL_SECONDS ? remaining : POLL_SECONDS))
   done
 }
 
 # Delete the given instances, then scale the scale set back to its capacity.
 # Argument: the IDs of the instances, separated by spaces.
 replace_instances() {
-  local deadline remaining
+  local deadline status=0
   local -a ids
   read -r -a ids <<<"$1"
   DELETED_IDS=$1
   deadline=$(($(date +%s) + REPLACE_WAIT_SECONDS))
-  if ! CAPACITY=$(az vmss show --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
-    --query sku.capacity --output tsv) || [[ ! $CAPACITY =~ ^[0-9]+$ ]]; then
+  CAPACITY=$(timeout "$CALL_SECONDS" az vmss show --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
+    --query sku.capacity --output tsv) || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "Could not read the capacity of the scale set. $(call_error "$status" "$CALL_SECONDS")"
+  fi
+  if [[ ! $CAPACITY =~ ^[0-9]+$ ]]; then
     fail "Could not read the capacity of the scale set."
   fi
 
   log "Delete instances ${DELETED_IDS} of scale set ${VMSS_NAME}."
-  if ! az vmss delete-instances --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
-    --instance-ids "${ids[@]}" --no-wait --output none; then
-    fail "The delete of instances ${DELETED_IDS} did not start."
+  timeout "$CALL_SECONDS" az vmss delete-instances --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
+    --instance-ids "${ids[@]}" --no-wait --output none || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "The delete of instances ${DELETED_IDS} did not start. $(call_error "$status" "$CALL_SECONDS")"
   fi
-  if ! wait_until "$REPLACE_WAIT_SECONDS" deleted_instances_gone; then
+  if ! wait_until "$(seconds_until "$deadline")" deleted_instances_gone; then
     fail "Azure did not delete instances ${DELETED_IDS} in time."
   fi
 
   log "Scale the scale set back to ${CAPACITY} instances."
-  if ! az vmss scale --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
-    --new-capacity "$CAPACITY" --no-wait --output none; then
-    fail "The scale of the scale set did not start."
+  timeout "$CALL_SECONDS" az vmss scale --name "$VMSS_NAME" --resource-group "$RESOURCE_GROUP" \
+    --new-capacity "$CAPACITY" --no-wait --output none || status=$?
+  if [ "$status" -ne 0 ]; then
+    fail "The scale of the scale set did not start. $(call_error "$status" "$CALL_SECONDS")"
   fi
-  remaining=$((deadline - $(date +%s)))
-  if ! wait_until "$((remaining < 0 ? 0 : remaining))" replace_complete || [ -n "$(not_succeeded_ids)" ]; then
+  if ! wait_until "$(seconds_until "$deadline")" replace_complete || [ -n "$(not_succeeded_ids)" ]; then
     fail "After the replace, not all instances are in the state Succeeded."
   fi
   log "The replace is complete. All instances are in the state Succeeded."
@@ -165,7 +227,11 @@ else
 fi
 log "$reimage_result"
 
-read_instances
+read_status=0
+read_instances "$CALL_SECONDS" || read_status=$?
+if [ "$read_status" -ne 0 ]; then
+  fail "Could not read the instances of the scale set. $(call_error "$read_status" "$CALL_SECONDS")"
+fi
 log "Instances: $(summary)"
 stuck_ids=$(not_succeeded_ids)
 if [ -n "$stuck_ids" ]; then
