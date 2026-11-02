@@ -339,13 +339,16 @@ async def test_airlock_export_review_vm_flow(verify):
                         await tamper
             assert submitted["airlockRequest"]["status"] == airlock_strings.SUBMITTED_STATUS
             LOGGER.info(
-                "Old draft SAS after submission: %d of %d writes accepted, start delay %d s, final attempts %s",
-                evidence["accepted_writes"],
+                "Old draft SAS after submission: %d of %d writes answered, %d accepted, start delay %d s, "
+                "final attempts %s",
+                evidence["answered_writes"],
                 evidence["attempted_writes"],
+                evidence["accepted_writes"],
                 evidence["start_delay_seconds"],
                 evidence["final"],
             )
-            assert evidence["attempted_writes"] > 0, "The tamper probe sent no write through the old draft SAS"
+            # A write without an HTTP answer does not show what the storage does with the old SAS.
+            assert evidence["answered_writes"] > 0, "The storage answered no write through the old draft SAS"
             assert evidence["start_delay_seconds"] <= TAMPER_MAX_START_DELAY_SECONDS, (
                 f"The tamper probe started {evidence['start_delay_seconds']} s late. "
                 f"The limit is {TAMPER_MAX_START_DELAY_SECONDS} s."

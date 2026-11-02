@@ -43,6 +43,7 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.identity = token(["WorkspaceOwner", "AirlockManager"])
         self.tamper_final = {"overwrite": 404, "add": 404, "delete": 404}
         self.tamper_attempts = 200
+        self.tamper_answered = 200
         self.tamper_delay = 0
         # The real lead gives the Run Command time to start. A test needs no wait.
         self.enterContext(patch.object(export, "TAMPER_LEAD_SECONDS", 2))
@@ -219,6 +220,7 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(kwargs["start_at"].microsecond, 0)
                 return {
                     "accepted_writes": 0,
+                    "answered_writes": self.tamper_answered,
                     "attempted_writes": self.tamper_attempts,
                     "start_delay_seconds": self.tamper_delay,
                     "final": self.tamper_final,
@@ -289,13 +291,23 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls["tamper"]["container_url"], calls["upload"]["container_url"])
 
     async def test_a_tamper_probe_without_writes_in_time_fails_before_review(self):
-        for attempts, delay, message in ((0, 0, "sent no write"), (200, 60, "started 60 s late. The limit is 30 s")):
+        for attempts, delay, message in (
+            (0, 0, "answered no write"),
+            (200, 60, "started 60 s late. The limit is 30 s"),
+        ):
             with self.subTest(attempts=attempts, delay=delay):
                 self.events.clear()
-                self.tamper_attempts, self.tamper_delay = attempts, delay
+                self.tamper_attempts, self.tamper_answered, self.tamper_delay = attempts, attempts, delay
                 with self.assertRaisesRegex(AssertionError, message):
                     await export.test_airlock_export_review_vm_flow(True)
                 self.assertNotIn("review", self.events)
+
+    async def test_tamper_writes_without_an_http_answer_fail_before_review(self):
+        # Each write timed out or found no connection, so no write shows what the storage does with the old SAS.
+        self.tamper_answered = 0
+        with self.assertRaisesRegex(AssertionError, "The storage answered no write through the old draft SAS"):
+            await export.test_airlock_export_review_vm_flow(True)
+        self.assertNotIn("review", self.events)
 
     async def test_an_old_draft_sas_that_still_writes_after_the_submit_fails_before_review(self):
         self.tamper_final = {"overwrite": 201, "add": 404, "delete": 404}

@@ -253,6 +253,7 @@ class ProbeCommandTests(unittest.IsolatedAsyncioTestCase):
 TAMPER = {
     "phase": "tamper",
     "accepted_writes": 2,
+    "answered_writes": 190,
     "attempted_writes": 200,
     "start_delay_seconds": 0,
     "final": {"overwrite": 404, "add": 404, "delete": 404},
@@ -306,6 +307,13 @@ class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(loop)
         self.assertEqual(tuple(int(code) for code in loop.group(1).split(",")), export.REFUSAL_CODES)
 
+    def test_the_tamper_probe_counts_only_writes_with_an_http_answer(self):
+        script = probe.SCRIPT.read_text()
+        # Send-Blob returns 0 when no HTTP answer came back. Such a write is an attempt, not an answer.
+        self.assertIn("if ($null -eq $answer) { return 0 }", script)
+        self.assertIn("if ($code -ne 0) { $answered++ }", script)
+        self.assertIn("$result.answered_writes = $answered", script)
+
     def test_tamper_evidence_needs_every_attempt_as_a_number(self):
         def check(**overrides):
             return probe.probe_result(
@@ -313,11 +321,19 @@ class TamperProbeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(check()["final"]["overwrite"], 404)
+        self.assertEqual(check()["answered_writes"], 190)
+        missing = {key: value for key, value in TAMPER.items() if key != "answered_writes"}
+        with self.assertRaises(AssertionError):
+            probe.probe_result(result(**missing), phase="tamper", probe_id=PROBE_ID, expected_hash=HASH)
         for overrides in (
             {"accepted_writes": -1},
             {"accepted_writes": "2"},
+            {"answered_writes": -1},
+            {"answered_writes": "190"},
             {"attempted_writes": -1},
             {"accepted_writes": 3, "attempted_writes": 2},
+            {"accepted_writes": 3, "answered_writes": 2},
+            {"answered_writes": 201},
             {"start_delay_seconds": "0"},
             {"final": {"overwrite": 404, "add": 404}},
             {"final": {"overwrite": "404", "add": 404, "delete": 404}},

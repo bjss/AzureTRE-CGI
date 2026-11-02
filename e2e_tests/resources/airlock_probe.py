@@ -96,18 +96,15 @@ def _unique_object(items):
 
 
 def tamper_evidence(evidence, probe_id, expected_hash):
-    """A tamper probe reports its write attempts, the writes that Azure accepted, its start delay and the final
-    status of each attempt."""
+    """A tamper probe reports its write attempts, the writes that got an HTTP answer, the writes that Azure accepted,
+    its start delay and the final status of each attempt."""
     final = evidence.get("final")
+    counts = ("accepted_writes", "answered_writes", "attempted_writes")
     if (
-        set(evidence)
-        != {"phase", "probe", "sha256", "accepted_writes", "attempted_writes", "start_delay_seconds", "final"}
+        set(evidence) != {"phase", "probe", "sha256", *counts, "start_delay_seconds", "final"}
         or (evidence["phase"], evidence["probe"], evidence["sha256"]) != ("tamper", probe_id, expected_hash)
-        or any(
-            type(evidence[key]) is not int or evidence[key] < 0
-            for key in ("accepted_writes", "attempted_writes", "start_delay_seconds")
-        )
-        or evidence["accepted_writes"] > evidence["attempted_writes"]
+        or any(type(evidence[key]) is not int or evidence[key] < 0 for key in (*counts, "start_delay_seconds"))
+        or not evidence["accepted_writes"] <= evidence["answered_writes"] <= evidence["attempted_writes"]
         or not isinstance(final, dict)
         or set(final) != set(TAMPER_ATTEMPTS)
         or any(type(code) is not int for code in final.values())
