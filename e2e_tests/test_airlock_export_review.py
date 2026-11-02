@@ -361,20 +361,23 @@ async def test_airlock_export_review_vm_flow(verify):
             )
             async with asyncio.timeout(15 * 60):
                 await wait_for_status(airlock_strings.IN_REVIEW_STATUS, token, workspace_path, request_id, verify)
-            async with managed_review_vm(workspace_path, request_id, token, token, verify) as review_path:
-                review_vm, review_location = await owned_vm(
-                    arm, review_path, REVIEW_TEMPLATE, workspace_id, service_id, token, verify
-                )
-                # The review copy must hold the submitted content only, also if a write after the submit passed.
-                await run_probe(arm, review_vm, review_location, phase="read", **probe)
-                await post_request(
-                    {"approval": True, "decisionExplanation": "Synthetic export data matched the expected hash"},
-                    endpoint + "/review",
-                    token,
-                    verify,
-                    200,
-                )
-                async with asyncio.timeout(15 * 60):
-                    await wait_for_status(airlock_strings.APPROVED_STATUS, token, workspace_path, request_id, verify)
-                await assert_approved_copy(endpoint, token, verify, probe["blob_name"], expected_hash)
-                await wait_for_review_vm_deletion(review_path, token, verify)
+            # The review VM recovery gets its share of the cleanup time, the same as the other owned resources.
+            review_path = await resources.enter_async_context(
+                managed_review_vm(workspace_path, request_id, token, token, verify)
+            )
+            review_vm, review_location = await owned_vm(
+                arm, review_path, REVIEW_TEMPLATE, workspace_id, service_id, token, verify
+            )
+            # The review copy must hold the submitted content only, also if a write after the submit passed.
+            await run_probe(arm, review_vm, review_location, phase="read", **probe)
+            await post_request(
+                {"approval": True, "decisionExplanation": "Synthetic export data matched the expected hash"},
+                endpoint + "/review",
+                token,
+                verify,
+                200,
+            )
+            async with asyncio.timeout(15 * 60):
+                await wait_for_status(airlock_strings.APPROVED_STATUS, token, workspace_path, request_id, verify)
+            await assert_approved_copy(endpoint, token, verify, probe["blob_name"], expected_hash)
+            await wait_for_review_vm_deletion(review_path, token, verify)

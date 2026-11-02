@@ -357,6 +357,34 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.events[-5:], ["recover-review", "delete-seed", "delete-service", "delete-workspace", "delete-nexus"]
         )
 
+    async def test_a_stalled_review_vm_recovery_keeps_cleanup_time_for_the_other_resources(self):
+        from e2e_tests import test_airlock as airlock
+
+        async def stall(*args, **kwargs):
+            await asyncio.Event().wait()
+
+        async def recover(*args):
+            self.events.append("recover-review")
+            await asyncio.Event().wait()
+
+        review = AsyncMock(return_value=(SERVICE_PATH + "/user-resources/" + REVIEW, REVIEW))
+        with (
+            patch.object(export, "LIFECYCLE_SECONDS", 2.0),
+            patch.object(export, "CLEANUP_RESERVE_SECONDS", 1.5),
+            # The real helper. Its recovery has a limit of 60 minutes and continues after a cancellation.
+            patch.object(export, "managed_review_vm", airlock.managed_review_vm),
+            patch.object(airlock, "post_resource", review),
+            patch.object(airlock, "delete_owned_resource_if_present", recover),
+            # The work deadline expires while the case waits for the automatic deletion.
+            patch.object(export, "wait_for_review_vm_deletion", stall),
+            self.assertRaises(TimeoutError),
+        ):
+            await export.test_airlock_export_review_vm_flow(True)
+        # The review VM recovery stops at the end of its share. The other resources still get their cleanup.
+        self.assertEqual(
+            self.events[-5:], ["recover-review", "delete-seed", "delete-service", "delete-workspace", "delete-nexus"]
+        )
+
     async def test_a_failed_workspace_creation_keeps_the_client_secret_out_of_the_failure_report(self):
         import _pytest._code
         import httpx

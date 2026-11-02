@@ -199,7 +199,7 @@ Recovery cleanup cannot turn failed automatic deletion into a passing result.
 The bundle job sets a 270-minute absolute deadline before container startup.
 Provisioning and validation stop with 120 minutes reserved for cleanup, within the 300-minute job limit.
 Local runs start that budget when the case begins. Failed setup and probes also trigger bounded cleanup.
-Each owned resource receives a share of the remaining cleanup time, so one stalled delete cannot consume the entire reserve.
+Each owned resource, also the export review VM, receives a share of the remaining cleanup time, so one stalled delete cannot consume the entire reserve.
 The case removes its VMs, service and workspace before releasing its Nexus prerequisites.
 Interactive desktop access, denied access, rejected exports, upgrades, custom actions and physical resource removal need separate evidence.
 
