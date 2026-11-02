@@ -345,6 +345,36 @@ class ExportLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.events[-5:], ["recover-review", "delete-seed", "delete-service", "delete-workspace", "delete-nexus"]
         )
 
+    async def test_a_failed_workspace_creation_keeps_the_client_secret_out_of_the_failure_report(self):
+        import _pytest._code
+        import httpx
+
+        from e2e_tests import conftest as fixtures
+
+        secret = os.urandom(16).hex()
+
+        @asynccontextmanager
+        async def failed_template(*args):
+            yield httpx.Response(500, text="error")
+
+        with (
+            patch.object(export.config, "TEST_WORKSPACE_APP_SECRET", secret),
+            # The real helper, so that the report has its frames and arguments.
+            patch.object(export, "create_or_get_test_workspace", fixtures.create_or_get_test_workspace),
+            patch.object(fixtures, "get_template", failed_template),
+            patch.object(fixtures, "get_admin_token", AsyncMock(return_value="admin")),
+        ):
+            try:
+                await export.test_airlock_export_review_vm_flow(True)
+            except AssertionError as error:
+                # pytest shows the arguments of the first and last frames. This report shows them for all frames.
+                report = str(_pytest._code.ExceptionInfo.from_exception(error).getrepr(funcargs=True, style="long"))
+            else:
+                self.fail("A failed template read must fail the case")
+        self.assertIn("Failed to GET workspace template", report)
+        self.assertNotIn(secret, report)
+        self.assertIn("client_secret = '<hidden>'", report)
+
     async def test_fallback_deletion_does_not_make_failed_automatic_deletion_pass(self):
         self.fail_deletion = True
         with self.assertRaisesRegex(TimeoutError, "automatic deletion stalled"):
