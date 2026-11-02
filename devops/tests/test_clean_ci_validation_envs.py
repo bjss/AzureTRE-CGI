@@ -107,7 +107,17 @@ elif command == "az":
     elif config.get("real_destroy") and args[:3] == ["group", "lock", "list"]:
         if config.get("core_lock_list_error"):
             sys.exit(1)
-    elif config.get("real_destroy") and args[:2] in (["resource", "list"], ["acr", "list"], ["lock", "list"]):
+    elif config.get("real_destroy") and args[:2] in (["resource", "list"], ["lock", "list"]):
+        pass
+    elif config.get("real_destroy") and args[:2] == ["acr", "list"]:
+        for name in config.get("registries", {}).get(args[args.index("--resource-group") + 1], []):
+            print(name)
+    elif config.get("real_destroy") and args[:3] == ["acr", "repository", "list"]:
+        if config.get("registry_error"):
+            sys.exit("Unable to authenticate using AAD or admin login credentials.")
+        for name in config.get("repositories", {}).get(args[args.index("--name") + 1], []):
+            print(name)
+    elif config.get("real_destroy") and args[:3] == ["acr", "repository", "delete"]:
         pass
     elif config.get("real_destroy") and args[:2] == ["keyvault", "list"]:
         if "--resource-group" in args:
@@ -585,6 +595,39 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.deleted_environment_groups(), ["rg-tretest-mgmt"])
         self.assertFalse(any(call[:4] == ["az", "group", "lock", "list"] for call in self.calls))
+
+    def run_destroy_with_registries(self, **config):
+        self.use_real_destroy_helper()
+        self.config.update(
+            groups=["rg-tretest\trefs/pull/5085/merge", "rg-tretest-mgmt\trefs/pull/5085/merge", "rg-tretest-ws-abcd"],
+            open_prs=[],
+            registries={"rg-tretest": ["acrcore"], "rg-tretest-mgmt": ["acrmgmt"]},
+            repositories={"acrcore": ["api"], "acrmgmt": ["bundle-a", "bundle-b"]},
+            **config,
+        )
+        return self.run_cleanup()
+
+    def test_real_destroy_purges_all_registries_before_the_slow_steps(self):
+        # After some long group deletes, the sign-in of a CI job can be too old to get a new registry token.
+        result = self.run_destroy_with_registries()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        purges = [index for index, call in enumerate(self.calls) if call[:4] == ["az", "acr", "repository", "delete"]]
+        self.assertEqual(
+            [self.calls[index][self.calls[index].index("--repository") + 1] for index in purges],
+            ["bundle-a", "bundle-b", "api"],
+        )
+        core_inspection = self.calls.index(
+            ["az", "group", "lock", "list", "-g", "rg-tretest", "--query", "[].id", "-o", "tsv"]
+        )
+        first_delete = next(index for index, call in enumerate(self.calls) if call[:3] == ["az", "group", "delete"])
+        self.assertLess(purges[-1], core_inspection)
+        self.assertLess(purges[-1], first_delete)
+        self.assertEqual(self.deleted_environment_groups(), ["rg-tretest-ws-abcd", "rg-tretest-mgmt", "rg-tretest"])
+
+    def test_real_destroy_registry_failure_prevents_deletion(self):
+        result = self.run_destroy_with_registries(registry_error=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(call[:3] == ["az", "group", "delete"] for call in self.calls))
 
     def run_destroy_with_failed_workspace(self, **config):
         if not self.config.get("real_destroy"):
