@@ -132,12 +132,16 @@ try {
         $changed = [Text.Encoding]::UTF8.GetBytes("Changed after submission $ProbeId`n")
         $blobUrl = Get-BlobUrl $uri $BlobName
         $accepted = 0
+        $answered = 0
         $attempted = 0
         # The Run Command can start late. The test needs to know when the writes started.
         $startDelay = [int][Math]::Max(0, [Math]::Floor(([DateTime]::UtcNow - $start).TotalSeconds))
         while (([DateTime]::UtcNow - $start).TotalSeconds -lt $TamperSeconds) {
             $attempted++
-            if ((Send-Blob $blobUrl 'PUT' $changed) -eq 201) { $accepted++ }
+            $code = Send-Blob $blobUrl 'PUT' $changed
+            # Send-Blob returns 0 if no HTTP answer came back. Only an answer shows what the storage did.
+            if ($code -ne 0) { $answered++ }
+            if ($code -eq 201) { $accepted++ }
             Start-Sleep -Milliseconds 500
         }
         # After the submit, the old SAS must not change, add or delete any data.
@@ -154,6 +158,7 @@ try {
             if ($open) { Start-Sleep -Seconds 15 }
         } while ($open -and [DateTime]::UtcNow -lt $deadline)
         $result.accepted_writes = $accepted
+        $result.answered_writes = $answered
         $result.attempted_writes = $attempted
         $result.start_delay_seconds = $startDelay
         $result.final = $final

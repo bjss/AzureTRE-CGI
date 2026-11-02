@@ -184,8 +184,8 @@ The upload VM sends one synthetic blob to the export draft through the workspace
 The SAS is a protected Run Command parameter. The probe does not print it.
 Before the submit, the case starts a second probe on the upload VM with a start time.
 The case submits the request about 15 seconds before that time. The submit must end at least 2 seconds before it.
-For up to 2 minutes the probe writes changed content through the old draft SAS. It counts the attempts and the writes that Azure accepts.
-The case fails if the probe sends no write, or if it starts more than 30 seconds after the planned time.
+For up to 2 minutes the probe writes changed content through the old draft SAS. It counts the attempts, the writes that get an HTTP answer and the writes that Azure accepts.
+The case fails if the storage answers no write, or if the probe starts more than 30 seconds after the planned time.
 It then tries an overwrite, a new blob and a delete through the same SAS. Each attempt must get HTTP 403, 404 or 409.
 The probe tries the three requests again for up to 10 minutes after any other answer.
 The Airlock processor copies the draft some seconds after the submit. So the writes of the probe come after that copy, and the case does not test writes during the copy.
