@@ -244,7 +244,8 @@ async def test_airlock_export_review_vm_flow(verify):
             verify=verify,
             pre_created_workspace_id="",
             client_id=config.TEST_WORKSPACE_APP_ID,
-            client_secret=config.TEST_WORKSPACE_APP_SECRET,
+            # The creation helpers get the secret as an argument. A failure report must not show it.
+            client_secret=HiddenText(config.TEST_WORKSPACE_APP_SECRET),
         )
         resources.push_async_callback(clean_up_test_workspace, "", workspace_path, verify)
         token = await get_workspace_owner_token(workspace_id, verify)
