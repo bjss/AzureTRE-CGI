@@ -14,12 +14,17 @@ import unittest
 MODULE = Path(__file__).resolve().parents[2] / "core/terraform/resource_processor/vmss_porter"
 SCRIPT = MODULE / "reimage_instances.sh"
 LOGIN_LIFETIME_SECONDS = 40 * 60
+# The worst case in the header of the script, with the default values.
+WORST_CASE_SECONDS = 310 + 720 + 60 + 680
 HANG = "hang"
 
 # The mocked "az" returns scripted instance states. Each action (reimage, delete-instances and scale)
-# starts a new list of states, and the last item of a list repeats. The item "error" makes the read fail.
-# The reimage ends with the exit code "reimage_exit". With "hang", the reimage does not end: under the
-# mocked "timeout" it returns 200 at once, and under the real "timeout" it waits until "timeout" stops it.
+# starts a new list of states, and the last item of a list repeats. The item "error" makes the read fail,
+# and the item "hang" makes the read hang. The reimage ends with the exit code "reimage_exit", or it hangs
+# with "hang". The actions in the list "hang" (show, delete-instances or scale) hang.
+# A call that hangs does not end. Under the mocked "timeout" it returns 200 at once, and under the real
+# "timeout" it waits until "timeout" stops it. Without "timeout", it ends with an error only when the
+# Azure CLI login expires. With "slow", each call other than the reimage uses all of its time limit.
 MOCK_AZ = r"""
 import json
 import os
@@ -27,13 +32,16 @@ from pathlib import Path
 import sys
 import time
 
+HANG = "hang"
 root = Path(os.environ["MOCK_ROOT"])
 config = json.loads((root / "config.json").read_text())
 state_file = root / "state.json"
 state = json.loads(state_file.read_text()) if state_file.exists() else {"phase": "start", "index": 0}
 args = sys.argv[1:]
+limit = os.environ.get("MOCK_TIMEOUT")
+clock_file = root / "clock"
 with (root / "calls.jsonl").open("a") as log:
-    entry = {"clock": int((root / "clock").read_text()), "args": args, "timeout": os.environ.get("MOCK_TIMEOUT")}
+    entry = {"clock": int(clock_file.read_text()), "args": args, "timeout": limit}
     log.write(json.dumps(entry) + "\n")
 
 
@@ -48,13 +56,37 @@ def finish(code=0, output=""):
     sys.exit(code)
 
 
+def move_clock(seconds):
+    clock_file.write_text(str(int(clock_file.read_text()) + seconds))
+
+
+def hang():
+    if limit is not None:
+        finish(200)
+    if config["fake_clock"]:
+        move_clock(config["login_lifetime"])
+        finish(1, "ERROR: AADSTS700024: Client assertion is not within its valid time range.")
+    state_file.write_text(json.dumps(state))
+    time.sleep(30)
+    finish(200)
+
+
 if option("--name") == "vmss-mock" and option("--resource-group") == "rg-mock":
     action = args[1]
     tsv = option("--output") == "tsv"
+    if action != "reimage":
+        if action in config["hang"]:
+            hang()
+        if config["slow"]:
+            if limit is None:
+                hang()
+            move_clock(int(limit))
     if action == "list-instances" and tsv and option("--query") == "[].[instanceId, provisioningState]":
         states = config[state["phase"]]
         current = states[min(state["index"], len(states) - 1)]
         state["index"] += 1
+        if current == HANG:
+            hang()
         if current == "error":
             finish(1, "ERROR: AADSTS700024: Client assertion is not within its valid time range.")
         finish(output="\n".join(instance_id + "\t" + value for instance_id, value in current))
@@ -62,11 +94,8 @@ if option("--name") == "vmss-mock" and option("--resource-group") == "rg-mock":
         finish(output=str(config["capacity"]))
     if action == "reimage" and "--no-wait" not in args:
         state["phase"], state["index"] = action, 0
-        if config["reimage_exit"] == "hang":
-            if "MOCK_TIMEOUT" not in os.environ:
-                state_file.write_text(json.dumps(state))
-                time.sleep(30)
-            finish(200)
+        if config["reimage_exit"] == HANG:
+            hang()
         finish(config["reimage_exit"], "ERROR: (VMStartTimedOut) mocked reimage error" if config["reimage_exit"] else "")
     if action in ("delete-instances", "scale") and "--no-wait" in args:
         state["phase"], state["index"] = action, 0
@@ -104,7 +133,11 @@ class ReimageInstancesTests(unittest.TestCase):
             "reimage": [ONE_GOOD],
             "delete-instances": [[["0", "Deleting"]], []],
             "scale": [[["1", "Creating"]], [["1", "Succeeded"]]],
+            "hang": [],
+            "slow": False,
             **scenario,
+            "fake_clock": fake_clock,
+            "login_lifetime": LOGIN_LIFETIME_SECONDS,
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -136,6 +169,9 @@ class ReimageInstancesTests(unittest.TestCase):
 
     def actions(self):
         return [args[1] for _, args, _ in self.az_calls]
+
+    def read_limits(self):
+        return [limit for _, args, limit in self.az_calls if args[1] == "list-instances"]
 
     def action_call(self, action):
         matches = [call for call in self.az_calls if call[1][1] == action]
@@ -266,6 +302,106 @@ class ReimageInstancesTests(unittest.TestCase):
         self.assertEqual(self.clock, 300 + 720 + 600)
         self.assertLess(self.clock, LOGIN_LIFETIME_SECONDS)
 
+    def test_worst_case_with_slow_azure_cli_calls_ends_before_the_login_expires(self):
+        # Each call other than the reimage uses all of its time limit. The instance becomes free at the
+        # last read of the first wait, Azure deletes the instance at the last read of the delete wait,
+        # and the new instance stays busy.
+        result = self.run_script(
+            slow=True,
+            start=[[["0", "Updating"]]] * 3 + [ONE_GOOD],
+            reimage_exit=HANG,
+            reimage=[[["0", "Updating"]]],
+            **{"delete-instances": [[["0", "Deleting"]]] * 6 + [[]]},
+            scale=[[["1", "Creating"]]],
+        )
+        self.assert_repair_message(result)
+        self.assertIn("After the replace, not all instances are in the state Succeeded.", result.stderr)
+        # 300 for the first wait, 720 for the reimage, 60 for the read after the reimage, 600 for the
+        # replace, 10 for the last read of the delete wait, 60 for the scale call and 10 for the last
+        # read. The first wait ends at its time limit, so this case is 10 seconds less than the worst case.
+        self.assertEqual(self.clock, 300 + 720 + 60 + 600 + 10 + 60 + 10)
+        self.assertEqual(self.read_limits()[-2:], ["10", "10"])
+        self.assertLessEqual(self.clock, WORST_CASE_SECONDS)
+        self.assertLess(WORST_CASE_SECONDS, LOGIN_LIFETIME_SECONDS)
+
+    def test_each_azure_cli_call_has_a_time_limit(self):
+        result = self.run_script(reimage_exit=1, reimage=[[["0", "Failed"]]])
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertEqual(
+            self.actions(),
+            ["list-instances", "reimage", "list-instances", "show", "delete-instances"]
+            + ["list-instances"] * 2
+            + ["scale"]
+            + ["list-instances"] * 2,
+        )
+        for _, args, limit in self.az_calls:
+            with self.subTest(action=args[1]):
+                self.assertEqual(limit, "720" if args[1] == "reimage" else "60")
+
+    def test_read_that_stalls_in_a_wait_is_tried_again(self):
+        busy = [["0", "Updating"]]
+        message = (
+            "Could not read the instances of the scale set. The time limit of 60 seconds for the Azure CLI call ended."
+        )
+        with self.subTest("the instance becomes free"):
+            result = self.run_script(start=[busy, HANG, ONE_GOOD])
+            self.assertEqual(result.returncode, 0, self.output)
+            self.assertIn(message, result.stdout)
+            # The stalled read starts at 20 and stops at 80. The next read starts at 100.
+            clock, _, _ = self.action_call("reimage")
+            self.assertEqual(clock, 100)
+            self.assertIn("The reimage is complete.", result.stdout)
+        with self.subTest("the instance stays busy until the end of the wait"):
+            result = self.run_script(start=[busy, HANG, busy])
+            self.assertEqual(result.returncode, 0, self.output)
+            self.assertIn(message, result.stdout)
+            self.assertNotIn("reimage", self.actions())
+            self.assert_replaced(["0"], 1, at_clock=300)
+
+    def test_wait_stops_the_script_when_its_last_read_stalls(self):
+        busy = [["0", "Updating"]]
+        cases = [
+            # The reads start at 0, 20, 100, 180 and 260. The last read gets the rest of the wait.
+            ("the rest of the wait", [busy, HANG], "40", 300),
+            # The reads start at 0, 20, ..., 300. The last read gets at least 10 seconds.
+            ("at least 10 seconds", [busy] * 15 + [HANG], "10", 310),
+        ]
+        for name, start, last_limit, at_clock in cases:
+            with self.subTest(name):
+                result = self.run_script(start=start)
+                self.assert_repair_message(result)
+                self.assertIn(f"The time limit of {last_limit} seconds for the Azure CLI call ended.", result.stdout)
+                self.assertIn("The time limit of 300 seconds ended.", result.stdout)
+                self.assertIn("The last read of the instances failed", result.stderr)
+                self.assertEqual(self.read_limits()[-1], last_limit)
+                self.assertEqual(set(self.actions()), {"list-instances"})
+                self.assertEqual(self.clock, at_clock)
+
+    def test_stalled_call_in_a_replace_stops_the_script(self):
+        cases = [
+            ("show", "Could not read the capacity of the scale set.", 60),
+            ("delete-instances", "The delete of instances 0 did not start.", 60),
+            # The delete wait reads at 0 and at 20. Then the scale starts.
+            ("scale", "The scale of the scale set did not start.", 80),
+        ]
+        for action, message, at_clock in cases:
+            with self.subTest(action=action):
+                result = self.run_script(reimage_exit=1, reimage=[[["0", "Failed"]]], hang=[action])
+                self.assert_repair_message(result)
+                self.assertIn(f"{message} The time limit of 60 seconds for the Azure CLI call ended.", result.stderr)
+                self.assertEqual(self.actions()[-1], action)
+                self.assertEqual(self.clock, at_clock)
+
+    def test_stalled_read_after_the_reimage_stops_the_script(self):
+        result = self.run_script(reimage=[HANG])
+        self.assert_repair_message(result)
+        self.assertIn(
+            "Could not read the instances of the scale set. The time limit of 60 seconds for the Azure CLI call ended.",
+            result.stderr,
+        )
+        self.assertEqual(self.actions(), ["list-instances", "reimage", "list-instances"])
+        self.assertEqual(self.clock, 60)
+
     def test_real_timeout_stops_a_reimage_that_does_not_end(self):
         started = time.monotonic()
         result = self.run_script(
@@ -292,6 +428,9 @@ class ReimageInstancesTests(unittest.TestCase):
             ({"RESOURCE_GROUP": ""}, "Set RESOURCE_GROUP"),
             ({"REIMAGE_WAIT_SECONDS": "12m"}, "REIMAGE_*_SECONDS"),
             ({"REIMAGE_POLL_SECONDS": "-1"}, "REIMAGE_*_SECONDS"),
+            ({"REIMAGE_CALL_SECONDS": "1m"}, "REIMAGE_*_SECONDS"),
+            ({"REIMAGE_CALL_SECONDS": "0"}, '"timeout 0" has no time limit'),
+            ({"REIMAGE_WAIT_SECONDS": "0"}, '"timeout 0" has no time limit'),
         ]
         for environment, message in cases:
             with self.subTest(environment=environment):
