@@ -229,6 +229,19 @@ class WorkflowPrerequisiteTests(unittest.TestCase):
                         job["secrets"]["TEST_AML_USER_OBJECT_ID"], "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
                     )
 
+    def test_custom_job_sets_lifecycle_deadlines_before_the_container(self):
+        # The cases of one custom group share the job timeout, so each case needs the deadline of the job.
+        steps = yaml.safe_load((ROOT / ".github/workflows/deploy_tre_reusable.yml").read_text())["jobs"][
+            "e2e_tests_custom"
+        ]["steps"]
+        names = [s["name"] for s in steps]
+        run = next(s for s in steps if s["name"] == "Run E2E Tests")
+        for name in ("AML_VALIDATION_DEADLINE", "DATABRICKS_VALIDATION_DEADLINE"):
+            with self.subTest(name=name):
+                reserve = next(s for s in steps if f'echo "{name}=' in s.get("run", ""))
+                self.assertLess(names.index(reserve["name"]), names.index("Checkout"))
+                self.assertIn(f"{name}=${{{{ env.{name} }}}}", run["with"]["COMMAND"])
+
 
 class ServiceTagTests(unittest.TestCase):
     def test_firewall_tags_use_the_region_display_name(self):

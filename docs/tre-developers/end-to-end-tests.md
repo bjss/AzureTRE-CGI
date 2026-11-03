@@ -128,6 +128,7 @@ The parent case checks successful private AML workspace provisioning and removal
 These ARM checks follow the [compute response contract](https://learn.microsoft.com/en-us/rest/api/azureml/compute/get).
 
 The bundle job sets a 270-minute absolute deadline before container startup, with 120 minutes reserved for cleanup.
+A marker selection runs the AML and Databricks cases in the custom job. That job sets the same deadline at its start, so the cases of one group share it.
 Cleanup runs in reverse dependency order and divides the remaining time among owned resources.
 Local runs start the same budget when the case begins. Failed provisioning and verification still trigger bounded cleanup.
 Missing prerequisites and failed assertions fail the case. They do not count as skipped or passing coverage.

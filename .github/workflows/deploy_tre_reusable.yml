@@ -1018,6 +1018,15 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.e2e_tests_plan.outputs.groups) }}
     steps:
+      # The cases of one group share the 300-minute job timeout. Set the absolute deadlines of the
+      # lifecycle cases at the job start, as in the bundle job. A later case then gets only the
+      # remaining time, and the lifecycle helpers keep its 120-minute clean-up reserve.
+      - name: Reserve lifecycle cleanup and reporting time
+        run: |
+          deadline=$(( $(date +%s) + 270 * 60 ))
+          echo "AML_VALIDATION_DEADLINE=${deadline}" >> "$GITHUB_ENV"
+          echo "DATABRICKS_VALIDATION_DEADLINE=${deadline}" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -1034,7 +1043,7 @@ jobs:
       - name: Run E2E Tests
         uses: ./.github/actions/devcontainer_run_command
         with:
-          COMMAND: "TEST_ACCEPT_NEXUS_EULA=${{ inputs.acceptNexusEula }} TEST_RUN_CERTIFICATE_TESTS_ON_WEEKENDS=${{ inputs.runCertificateTestsOnWeekends }} make test-e2e-ci-group"
+          COMMAND: "TEST_ACCEPT_NEXUS_EULA=${{ inputs.acceptNexusEula }} TEST_RUN_CERTIFICATE_TESTS_ON_WEEKENDS=${{ inputs.runCertificateTestsOnWeekends }} AML_VALIDATION_DEADLINE=${{ env.AML_VALIDATION_DEADLINE }} DATABRICKS_VALIDATION_DEADLINE=${{ env.DATABRICKS_VALIDATION_DEADLINE }} make test-e2e-ci-group"
           DEVCONTAINER_TAG: ${{ inputs.DEVCONTAINER_TAG }}
           CI_CACHE_ACR_NAME: ${{ secrets.CI_CACHE_ACR_NAME}}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
