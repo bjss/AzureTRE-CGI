@@ -26,32 +26,25 @@ output "aml_subnet_address_prefixes" {
   value = azurerm_subnet.aml.address_prefixes
 }
 
-data "azurerm_network_service_tags" "storage_tag" {
-  location        = azurerm_storage_account.aml.location
-  service         = "Storage"
-  location_filter = azurerm_storage_account.aml.location
+# The service tags API uses short region codes for some regions, for example switzerlandn for switzerlandnorth,
+# so azurerm_network_service_tags cannot find their regional tags. A regional tag name is the service name and
+# the region display name without spaces, for example Storage.SwitzerlandNorth.
+data "azurerm_location" "aml" {
+  location = azurerm_storage_account.aml.location
 }
 
-data "azurerm_network_service_tags" "mcr_tag" {
-  location        = azurerm_storage_account.aml.location
-  service         = "MicrosoftContainerRegistry"
-  location_filter = azurerm_storage_account.aml.location
-}
-
-data "azurerm_network_service_tags" "batch_tag" {
-  location        = azurerm_storage_account.aml.location
-  service         = "BatchNodeManagement"
-  location_filter = azurerm_storage_account.aml.location
+locals {
+  service_tag_region = replace(data.azurerm_location.aml.display_name, " ", "")
 }
 
 output "storage_tag" {
-  value = data.azurerm_network_service_tags.storage_tag.name
+  value = "Storage.${local.service_tag_region}"
 }
 
 output "mcr_tag" {
-  value = data.azurerm_network_service_tags.mcr_tag.name
+  value = "MicrosoftContainerRegistry.${local.service_tag_region}"
 }
 
 output "batch_tag" {
-  value = data.azurerm_network_service_tags.batch_tag.name
+  value = "BatchNodeManagement.${local.service_tag_region}"
 }
