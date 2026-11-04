@@ -4,6 +4,20 @@
 # Remove these exact parser exceptions when actionlint supports queue.
 # ci_environment_workflow.test.js validates all reference group settings.
 paths:
+  # gh-aw v1.0.1 emits GitHub fields not yet recognised by actionlint v1.7.12.
+  # agentic-review.test.js checks the generated permissions and environment bindings.
+  .github/workflows/agentic-review.yml:
+    ignore:
+      - '^unknown permission scope "copilot-requests"\. all available permission scopes are .+$'
+  .github/workflows/agentic-review-copilot.lock.yml:
+    ignore:
+      - '^unknown permission scope "copilot-requests"\. all available permission scopes are .+$'
+      - '^property "workflow_(repository|sha|ref|file_path)" is not defined in object type .+$'
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
+  .github/workflows/agentic-review-codex.lock.yml:
+    ignore:
+      - '^property "workflow_(repository|sha|ref|file_path)" is not defined in object type .+$'
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
   .github/workflows/deploy_tre_branch.yml:
     ignore:
       - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'

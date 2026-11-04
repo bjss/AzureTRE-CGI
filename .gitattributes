@@ -25,3 +25,5 @@
 *.ez binary
 *.bz2 binary
 *.swp binary
+
+.github/workflows/*.lock.yml linguist-generated=true
