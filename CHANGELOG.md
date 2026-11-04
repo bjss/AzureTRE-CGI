@@ -8,7 +8,7 @@ Setting to `false` will delete existing airlock storage accounts and must only b
   Mirror the repositories before the upgrade, and rotate the workspace client secret after it. See the [Gitea upgrade steps](docs/tre-templates/workspace-services/gitea.md#upgrading-to-version-200). The upgrade needs a [force version update](docs/tre-admins/upgrading-resources.md#force-version-update). ([#5283](https://github.com/microsoft/AzureTRE/issues/5283))
 
 ENHANCEMENTS:
-* Add manual agentic branch reviews with configurable Copilot and Codex harnesses, environment-scoped credentials and immutable review reports. (`build-scripts` 1.2.0) ([#106](https://github.com/bjss/AzureTRE-CGI/pull/106))
+* Add a manual agentic pull request review with Codex. The native gh-aw workflow posts one review with inline comments, and the OpenAI key stays in the `CICD` environment. (`build-scripts` 1.2.1) ([#106](https://github.com/bjss/AzureTRE-CGI/pull/106), [#107](https://github.com/bjss/AzureTRE-CGI/pull/107))
 * Register the OpenAI bundle for branch validation, add GPT-5.1 as the default model and check regional model and quota prerequisites before its private lifecycle test. (`tre-workspace-service-openai` 1.1.0) ([#5150](https://github.com/microsoft/AzureTRE/issues/5150))
 * Add a private MySQL lifecycle check. A Nexus-backed Linux VM writes a row through private DNS, the SKU changes from Burstable to General Purpose, and the VM reads the row again. ([#5148](https://github.com/microsoft/AzureTRE/issues/5148))
 * Run the `stop`, `start` and `reset_password` actions in the Guacamole Linux VM check, and make sure of the VM power state and the new Key Vault secret version through Azure. ([#5145](https://github.com/microsoft/AzureTRE/issues/5145))
@@ -37,7 +37,6 @@ See [Legacy Airlock & migration](docs/azure-tre-overview/airlock.md#legacy-airlo
 * Let a fork run CI in a shared subscription with the `CI_ENV_PREFIX` variable and a `ci_repository` tag, which scope cleanup and destruction. Keep a CI environment, for example for a demo, with a `ci_keep_until` tag. (`core` 0.18.15, `devops` 0.7.0, `build-scripts` 1.1.5) ([#5272](https://github.com/microsoft/AzureTRE/pull/5272))
 
 BUG FIXES:
-* Forward the selected environment's OpenAI secret to the Codex workflow by name, and check before dispatch that the selected environment supplies it. Without the secret, AWF did not start its OpenAI proxy and Codex stopped with a missing API key error. (`build-scripts` 1.2.1) ([#106](https://github.com/bjss/AzureTRE-CGI/pull/106))
 * Update Nexus from 3.94.0 to 3.94.3. The Nexus 3.94.3 image stops trusting the eMudhra certificate chains that Sonatype reports as compromised. (`tre-shared-service-sonatype-nexus` 3.11.3) ([#5276](https://github.com/microsoft/AzureTRE/issues/5276))
 * Change the Azure Monitor private link scope of the core and of each workspace only after its private endpoint exists. In workspaces, also wait 5 minutes after the scope changes before Terraform deletes the endpoint.
   A scope change makes Azure update the endpoint, and during the update Azure rejects DNS zone group changes with 409 AnotherOperationInProgress, so some workspaces failed to deploy or delete.

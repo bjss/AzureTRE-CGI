@@ -157,7 +157,7 @@ nav:
               # Docs aimed at OSS developers, committing code to the AzureTRE repo
               - Introduction: tre-developers/index.md
               - Agent Guidance: tre-developers/agent-guidance.md
-              - Agentic Branch Reviews: tre-developers/agentic-review.md
+              - Agentic PR Reviews: tre-developers/agentic-review.md
               - API:
                   - API Overview: tre-developers/api.md
                   - API Permissions Map: tre-developers/api-permissions-map.md
