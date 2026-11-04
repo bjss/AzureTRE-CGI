@@ -46,9 +46,10 @@ The workflow references only the selected engine's credentials. It does not inhe
 The router explicitly passes `OPENAI_API_KEY` by name to the reusable Codex workflow.
 That declaration is required even when the value exists only in the selected environment.
 
-The Codex startup adapter supplies a non-secret placeholder after checking the local provider configuration and fresh AWF reflection.
-This handles gh-aw v1.0.1's startup key check while the real API key remains exclusively in the proxy.
-The adapter delegates execution to gh-aw's built-in Codex harness, preserving its policy, retries and timeouts.
+Inside the sandbox, AWF sets non-secret placeholder values for `OPENAI_API_KEY` and `CODEX_API_KEY`.
+The proxy replaces the placeholder with the real API key, which stays in the proxy container.
+Do not wrap gh-aw's Codex harness in another process.
+AWF removes a key from the environment after the first read, so a wrapper that reads the key hides it from the harness.
 
 Alternatively, run this command locally and enter the key at the secure prompt:
 

@@ -31,7 +31,6 @@ pre-agent-steps:
     run: |
       cp .github/scripts/agentic-review.js .github/scripts/agentic-review-copilot.cjs "$RUNNER_TEMP/gh-aw/actions/"
       cp .github/scripts/agentic-review-copilot.cjs "$RUNNER_TEMP/gh-aw/actions/review_copilot_harness.cjs"
-      cp .github/scripts/agentic-review-codex.cjs "$RUNNER_TEMP/gh-aw/actions/review_codex_harness.cjs"
 post-steps:
   - name: Collect the review report
     uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
