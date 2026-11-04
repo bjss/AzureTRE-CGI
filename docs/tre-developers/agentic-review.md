@@ -40,7 +40,7 @@ An invalid harness or reasoning setting fails the run instead of silently select
 4. If required, override `CODEX_MODEL` or `CODEX_REASONING_EFFORT` using environment or repository variables.
 
 Do not put the API key in an Actions variable, workflow file, pull request or chat message.
-The Codex activation job validates its credentials before inference.
+A native preflight job verifies that the selected environment supplies `OPENAI_API_KEY` before starting Codex.
 gh-aw excludes engine credentials from the agent sandbox and routes inference through its proxy.
 The workflow references only the selected engine's credentials. It does not inherit all environment secrets.
 

@@ -69,8 +69,25 @@ jobs:
       base_ref: ${{ inputs.base_ref }}
       environment: ${{ inputs.environment }}
 
-  codex:
+  codex-preflight:
     needs: select-harness
+    if: needs.select-harness.outputs.harness == 'codex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Validate the selected Codex environment
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo '::error::OPENAI_API_KEY is empty or unavailable in the selected environment.'
+            exit 1
+          fi
+          echo 'OPENAI_API_KEY is available in the selected environment.'
+
+  codex:
+    needs: [select-harness, codex-preflight]
     if: needs.select-harness.outputs.harness == 'codex'
     uses: ./.github/workflows/agentic-review-codex.lock.yml
     with:

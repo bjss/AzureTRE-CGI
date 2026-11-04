@@ -197,3 +197,13 @@ test('compiled jobs use the selected environment and grant no GitHub mutation pe
     }
   }
 });
+
+test('the native router validates the environment secret before calling Codex', () => {
+  const file = path.join(__dirname, '../workflows/agentic-review.yml');
+  const workflow = yaml.load(fs.readFileSync(file, 'utf8'));
+  const preflight = workflow.jobs['codex-preflight'];
+  expect(preflight.environment).toBe('${{ inputs.environment }}');
+  expect(preflight.steps[0].env.OPENAI_API_KEY).toBe('${{ secrets.OPENAI_API_KEY }}');
+  expect(preflight.outputs).toBeUndefined();
+  expect(workflow.jobs.codex.needs).toContain('codex-preflight');
+});
