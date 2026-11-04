@@ -44,6 +44,10 @@ The Codex activation job validates its credentials before inference.
 gh-aw excludes engine credentials from the agent sandbox and routes inference through its proxy.
 The workflow references only the selected engine's credentials. It does not inherit all environment secrets.
 
+The Codex startup adapter supplies a non-secret placeholder after checking the local provider configuration and fresh AWF reflection.
+This handles gh-aw v1.0.1's startup key check while the real API key remains exclusively in the proxy.
+The adapter delegates execution to gh-aw's built-in Codex harness, preserving its policy, retries and timeouts.
+
 Alternatively, run this command locally and enter the key at the secure prompt:
 
 ```bash

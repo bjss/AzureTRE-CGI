@@ -2,8 +2,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const yaml = require('js-yaml');
+const { spawnSync } = require('node:child_process');
 const { selectHarness, validateSettings, prepareReview, collectReport } = require('./agentic-review');
 const { withReasoningEffort } = require('./agentic-review-copilot.cjs');
+const { withProxyCredential, PROXY_PLACEHOLDER } = require('./agentic-review-codex.cjs');
+
+const proxyConfig = 'model_provider = "openai-proxy"\n[model_providers.openai-proxy]\n' +
+  'base_url = "http://172.30.0.30:10000"\nrequires_openai_auth = false\n';
+const proxyEnv = { AWF_REFLECT_ENABLED: '1', GH_AW_LLM_PROVIDER: 'openai' };
+const proxyReflection = { endpoints: [{ provider: 'openai', configured: true, port: 10000 }] };
 
 const BASE = 'a'.repeat(40);
 const HEAD = 'b'.repeat(40);
@@ -55,6 +62,49 @@ test('invalid Codex configuration fails, while settings for an inactive engine a
   expect(() => validateSettings({ REVIEW_HARNESS: 'codex', CODEX_REASONING_EFFORT: 'ultra' })).toThrow();
   expect(() => validateSettings({ REVIEW_HARNESS: 'codex', CODEX_MODEL: 'model\nsecret' })).toThrow();
   expect(() => validateSettings({ REVIEW_HARNESS: 'copilot', CODEX_REASONING_EFFORT: 'invalid' })).not.toThrow();
+});
+
+test('keyless Codex uses only a non-secret placeholder behind a freshly verified AWF proxy', () => {
+  const result = withProxyCredential(proxyEnv, proxyConfig, proxyReflection);
+  expect(result.CODEX_API_KEY).toBe(PROXY_PLACEHOLDER);
+  expect(result.OPENAI_API_KEY).toBeUndefined();
+  expect(proxyEnv.CODEX_API_KEY).toBeUndefined();
+});
+
+test.each([
+  [{}, proxyConfig, proxyReflection],
+  [proxyEnv, proxyConfig, null],
+  [proxyEnv, proxyConfig, { endpoints: [{ provider: 'openai', configured: false, port: 10000 }] }],
+  [proxyEnv, proxyConfig, { endpoints: [{ provider: 'github', configured: true, port: 10000 }] }],
+  [proxyEnv, proxyConfig.replace('172.30.0.30', 'api.openai.com'), proxyReflection],
+  [proxyEnv, proxyConfig.replace('requires_openai_auth = false', 'requires_openai_auth = true'), proxyReflection],
+])('refuses placeholder authentication without the matching local proxy', (settings, config, reflection) => {
+  expect(() => withProxyCredential(settings, config, reflection)).toThrow();
+});
+
+test('an existing credential is preserved without being replaced or logged', () => {
+  const settings = { OPENAI_API_KEY: 'unit-test-value' };
+  expect(withProxyCredential(settings, '', null)).toBe(settings);
+});
+
+test('the staged Codex adapter passes a placeholder to the original harness and preserves CLI arguments', () => {
+  const actions = path.join(temporary, 'actions');
+  const home = path.join(temporary, 'codex');
+  fs.mkdirSync(actions);
+  fs.mkdirSync(home);
+  fs.writeFileSync(path.join(home, 'config.toml'), proxyConfig);
+  const adapter = path.join(actions, 'review_codex_harness.cjs');
+  fs.copyFileSync(path.join(__dirname, 'agentic-review-codex.cjs'), adapter);
+  fs.writeFileSync(path.join(actions, 'awf_reflect.cjs'),
+    `exports.fetchAWFReflect = async () => ({ ok: true, reflectData: ${JSON.stringify(proxyReflection)} });`);
+  fs.writeFileSync(path.join(actions, 'codex_harness.cjs'),
+    'process.stdout.write(JSON.stringify({ key: process.env.CODEX_API_KEY, args: process.argv.slice(2) }));');
+  const result = spawnSync(process.execPath, [adapter, 'codex', 'exec'], {
+    encoding: 'utf8',
+    env: { ...proxyEnv, CODEX_HOME: home, GH_AW_MCP_CONFIG: '/unavailable/host/config.toml' },
+  });
+  expect(result.status).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual({ key: PROXY_PLACEHOLDER, args: ['codex', 'exec'] });
 });
 
 test('branch refs are resolved once and only immutable SHAs enter the comparison', async () => {
@@ -140,6 +190,10 @@ test('compiled jobs use the selected environment and grant no GitHub mutation pe
     }
     if (engine === 'codex') {
       expect(workflow.jobs.agent.steps.some(step => step.env?.OPENAI_API_KEY?.includes('secrets.OPENAI_API_KEY'))).toBe(true);
+      const execution = workflow.jobs.agent.steps.find(step => step.name === 'Execute Codex CLI').run;
+      expect(execution).toContain('--exclude-env CODEX_API_KEY');
+      expect(execution).toContain('--exclude-env OPENAI_API_KEY');
+      expect(execution).toContain('review_codex_harness.cjs');
     }
   }
 });

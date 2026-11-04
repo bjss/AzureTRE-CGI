@@ -38,6 +38,8 @@ env:
   REVIEW_HARNESS: codex
 engine:
   id: codex
+  harness:
+    use: review_codex_harness.cjs
   model: ${{ vars.CODEX_MODEL || 'gpt-6-luna' }}
   env:
     CODEX_REASONING_EFFORT: ${{ vars.CODEX_REASONING_EFFORT || 'max' }}
