@@ -3,6 +3,7 @@ extends: default
 
 # Compiler-generated workflow formatting is checked by gh-aw and actionlint.
 ignore: |
+  .github/workflows/agentic-review-copilot.lock.yml
   .github/workflows/agentic-review-codex.lock.yml
 
 rules:
