@@ -82,9 +82,17 @@ test.each([
   expect(() => withProxyCredential(settings, config, reflection)).toThrow();
 });
 
-test('an existing credential is preserved without being replaced or logged', () => {
-  const settings = { OPENAI_API_KEY: 'unit-test-value' };
+test('an existing Codex credential is preserved without being replaced or logged', () => {
+  const settings = { CODEX_API_KEY: 'unit-test-value' };
   expect(withProxyCredential(settings, '', null)).toBe(settings);
+});
+
+test('the AWF OpenAI placeholder also supplies the credential name required by Codex', () => {
+  const settings = { ...proxyEnv, OPENAI_API_KEY: 'awf-placeholder-for-isolation' };
+  const result = withProxyCredential(settings, proxyConfig, proxyReflection);
+  expect(result.CODEX_API_KEY).toBe(PROXY_PLACEHOLDER);
+  expect(result.CODEX_API_KEY).not.toBe(settings.OPENAI_API_KEY);
+  expect(result.OPENAI_API_KEY).toBe(settings.OPENAI_API_KEY);
 });
 
 test('the staged Codex adapter passes a placeholder to the original harness and preserves CLI arguments', () => {
@@ -101,7 +109,10 @@ test('the staged Codex adapter passes a placeholder to the original harness and 
     'process.stdout.write(JSON.stringify({ key: process.env.CODEX_API_KEY, args: process.argv.slice(2) }));');
   const result = spawnSync(process.execPath, [adapter, 'codex', 'exec'], {
     encoding: 'utf8',
-    env: { ...proxyEnv, CODEX_HOME: home, GH_AW_MCP_CONFIG: '/unavailable/host/config.toml' },
+    env: {
+      ...proxyEnv, OPENAI_API_KEY: 'awf-placeholder-for-isolation',
+      CODEX_HOME: home, GH_AW_MCP_CONFIG: '/unavailable/host/config.toml',
+    },
   });
   expect(result.status).toBe(0);
   expect(JSON.parse(result.stdout)).toEqual({ key: PROXY_PLACEHOLDER, args: ['codex', 'exec'] });

@@ -5,7 +5,7 @@ const { spawnSync } = require('node:child_process');
 const PROXY_PLACEHOLDER = 'gh-aw-openai-proxy-placeholder';
 
 function withProxyCredential(env, config, reflection) {
-  if (env.CODEX_API_KEY || env.OPENAI_API_KEY) return env;
+  if (env.CODEX_API_KEY) return env;
   const section = config.match(/\[model_providers\.openai-proxy\]([\s\S]*?)(?:\n\[|$)/)?.[1] || '';
   const base = section.match(/(?:^|\n)\s*base_url\s*=\s*"([^"]+)"/)?.[1];
   const endpoint = base ? new URL(base) : null;
@@ -24,7 +24,7 @@ function withProxyCredential(env, config, reflection) {
 
 async function main() {
   let env = process.env;
-  if (!env.CODEX_API_KEY && !env.OPENAI_API_KEY) {
+  if (!env.CODEX_API_KEY) {
     const configPath = env.CODEX_HOME ? path.join(env.CODEX_HOME, 'config.toml') : env.GH_AW_MCP_CONFIG;
     const config = fs.readFileSync(configPath, 'utf8');
     const { fetchAWFReflect } = require('./awf_reflect.cjs');
