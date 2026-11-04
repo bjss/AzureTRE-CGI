@@ -189,6 +189,7 @@ test('compiled jobs use the selected environment and grant no GitHub mutation pe
       }
     }
     if (engine === 'codex') {
+      expect(workflow.on.workflow_call.secrets.OPENAI_API_KEY.required).toBe(true);
       expect(workflow.jobs.agent.steps.some(step => step.env?.OPENAI_API_KEY?.includes('secrets.OPENAI_API_KEY'))).toBe(true);
       const execution = workflow.jobs.agent.steps.find(step => step.name === 'Execute Codex CLI').run;
       expect(execution).toContain('--exclude-env CODEX_API_KEY');
@@ -206,4 +207,5 @@ test('the native router validates the environment secret before calling Codex', 
   expect(preflight.steps[0].env.OPENAI_API_KEY).toBe('${{ secrets.OPENAI_API_KEY }}');
   expect(preflight.outputs).toBeUndefined();
   expect(workflow.jobs.codex.needs).toContain('codex-preflight');
+  expect(workflow.jobs.codex.secrets).toEqual({ OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}' });
 });

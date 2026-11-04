@@ -6,6 +6,9 @@ on:
   reaction: none
   status-comment: false
   workflow_call:
+    secrets:
+      OPENAI_API_KEY:
+        required: true
     inputs:
       pull_request_number:
         type: string

@@ -43,6 +43,8 @@ Do not put the API key in an Actions variable, workflow file, pull request or ch
 A native preflight job verifies that the selected environment supplies `OPENAI_API_KEY` before starting Codex.
 gh-aw excludes engine credentials from the agent sandbox and routes inference through its proxy.
 The workflow references only the selected engine's credentials. It does not inherit all environment secrets.
+The router explicitly passes `OPENAI_API_KEY` by name to the reusable Codex workflow.
+That declaration is required even when the value exists only in the selected environment.
 
 The Codex startup adapter supplies a non-secret placeholder after checking the local provider configuration and fresh AWF reflection.
 This handles gh-aw v1.0.1's startup key check while the real API key remains exclusively in the proxy.

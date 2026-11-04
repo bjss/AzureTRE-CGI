@@ -90,6 +90,8 @@ jobs:
     needs: [select-harness, codex-preflight]
     if: needs.select-harness.outputs.harness == 'codex'
     uses: ./.github/workflows/agentic-review-codex.lock.yml
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     with:
       pull_request_number: ${{ inputs.pull_request_number }}
       target_ref: ${{ inputs.target_ref }}
