@@ -101,6 +101,84 @@
       "default": true,
       "updateable": true
     },
+    "vm_backup_policy": {
+      "type": "object",
+      "title": "VM backup policy",
+      "description": "Overrides for the workspace VM daily backup policy. Omitted settings retain their existing defaults.",
+      "updateable": true,
+      "additionalProperties": false,
+      "properties": {
+        "timezone": { "type": "string", "title": "Azure timezone", "description": "Azure timezone name, for example UTC or GMT Standard Time.", "minLength": 1, "default": "UTC" },
+        "time": { "type": "string", "title": "Daily backup time", "description": "24-hour time on the hour or half-hour in the selected timezone.", "pattern": "^([01][0-9]|2[0-3]):(00|30)$", "default": "22:00" },
+        "daily_count": { "type": "integer", "title": "Daily retention count", "minimum": 7, "maximum": 9999, "default": 14 },
+        "weekly_count": { "type": "integer", "title": "Weekly retention count (0 disables weekly retention)", "minimum": 0, "maximum": 9999, "default": 4 },
+        "weekly_weekdays": {
+          "type": "array", "title": "Weekly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Sunday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "monthly_count": { "type": "integer", "title": "Monthly retention count (0 disables monthly retention)", "minimum": 0, "maximum": 9999, "default": 12 },
+        "monthly_weekdays": {
+          "type": "array", "title": "Monthly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Monday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "monthly_weeks": {
+          "type": "array", "title": "Monthly retention weeks", "minItems": 1, "uniqueItems": true, "default": ["First"],
+          "items": { "type": "string", "enum": ["First", "Second", "Third", "Fourth", "Last"] }
+        },
+        "yearly_count": { "type": "integer", "title": "Yearly retention count (0 disables yearly retention)", "minimum": 0, "maximum": 9999, "default": 2 },
+        "yearly_weekdays": {
+          "type": "array", "title": "Yearly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Sunday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "yearly_weeks": {
+          "type": "array", "title": "Yearly retention weeks", "minItems": 1, "uniqueItems": true, "default": ["Last"],
+          "items": { "type": "string", "enum": ["First", "Second", "Third", "Fourth", "Last"] }
+        },
+        "yearly_months": {
+          "type": "array", "title": "Yearly retention months", "minItems": 1, "uniqueItems": true, "default": ["December"],
+          "items": { "type": "string", "enum": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] }
+        }
+      }
+    },
+    "fileshare_backup_policy": {
+      "type": "object",
+      "title": "File-share backup policy",
+      "description": "Overrides for the workspace shared file-share daily backup policy. Omitted settings retain their existing defaults.",
+      "updateable": true,
+      "additionalProperties": false,
+      "properties": {
+        "timezone": { "type": "string", "title": "Azure timezone", "description": "Azure timezone name, for example UTC or GMT Standard Time.", "minLength": 1, "default": "UTC" },
+        "time": { "type": "string", "title": "Daily backup time", "description": "24-hour time on the hour or half-hour in the selected timezone.", "pattern": "^([01][0-9]|2[0-3]):(00|30)$", "default": "23:00" },
+        "daily_count": { "type": "integer", "title": "Daily retention count", "minimum": 1, "maximum": 200, "default": 14 },
+        "weekly_count": { "type": "integer", "title": "Weekly retention count (0 disables weekly retention)", "minimum": 0, "maximum": 200, "default": 4 },
+        "weekly_weekdays": {
+          "type": "array", "title": "Weekly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Sunday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "monthly_count": { "type": "integer", "title": "Monthly retention count (0 disables monthly retention)", "minimum": 0, "maximum": 120, "default": 12 },
+        "monthly_weekdays": {
+          "type": "array", "title": "Monthly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Monday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "monthly_weeks": {
+          "type": "array", "title": "Monthly retention weeks", "minItems": 1, "uniqueItems": true, "default": ["First"],
+          "items": { "type": "string", "enum": ["First", "Second", "Third", "Fourth", "Last"] }
+        },
+        "yearly_count": { "type": "integer", "title": "Yearly retention count (0 disables yearly retention)", "minimum": 0, "maximum": 10, "default": 2 },
+        "yearly_weekdays": {
+          "type": "array", "title": "Yearly retention weekdays", "minItems": 1, "uniqueItems": true, "default": ["Sunday"],
+          "items": { "type": "string", "enum": ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] }
+        },
+        "yearly_weeks": {
+          "type": "array", "title": "Yearly retention weeks", "minItems": 1, "uniqueItems": true, "default": ["Last"],
+          "items": { "type": "string", "enum": ["First", "Second", "Third", "Fourth", "Last"] }
+        },
+        "yearly_months": {
+          "type": "array", "title": "Yearly retention months", "minItems": 1, "uniqueItems": true, "default": ["December"],
+          "items": { "type": "string", "enum": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"] }
+        }
+      }
+    },
     "enable_dns_policy": {
       "type": "boolean",
       "title": "Enable DNS Security Policy",
@@ -394,6 +472,8 @@
       "client_secret",
       "enable_backup",
       "delete_backups_on_uninstall",
+      "vm_backup_policy",
+      "fileshare_backup_policy",
       "enable_airlock",
       "configure_review_vms",
       "airlock_review_config",
