@@ -35,33 +35,42 @@ resource "azurerm_backup_policy_vm" "vm_policy" {
   recovery_vault_name = azurerm_recovery_services_vault.vault.name
 
 
-  timezone = "UTC"
+  timezone = var.vm_backup_policy.timezone
 
   backup {
     frequency = "Daily"
-    time      = "22:00"
+    time      = var.vm_backup_policy.time
   }
 
   retention_daily {
-    count = 14
+    count = var.vm_backup_policy.daily_count
   }
 
-  retention_weekly {
-    count    = 4
-    weekdays = ["Sunday"]
+  dynamic "retention_weekly" {
+    for_each = var.vm_backup_policy.weekly_count > 0 ? [1] : []
+    content {
+      count    = var.vm_backup_policy.weekly_count
+      weekdays = var.vm_backup_policy.weekly_weekdays
+    }
   }
 
-  retention_monthly {
-    count    = 12
-    weekdays = ["Monday"]
-    weeks    = ["First"]
+  dynamic "retention_monthly" {
+    for_each = var.vm_backup_policy.monthly_count > 0 ? [1] : []
+    content {
+      count    = var.vm_backup_policy.monthly_count
+      weekdays = var.vm_backup_policy.monthly_weekdays
+      weeks    = var.vm_backup_policy.monthly_weeks
+    }
   }
 
-  retention_yearly {
-    count    = 2
-    months   = ["December"]
-    weekdays = ["Sunday"]
-    weeks    = ["Last"]
+  dynamic "retention_yearly" {
+    for_each = var.vm_backup_policy.yearly_count > 0 ? [1] : []
+    content {
+      count    = var.vm_backup_policy.yearly_count
+      months   = var.vm_backup_policy.yearly_months
+      weekdays = var.vm_backup_policy.yearly_weekdays
+      weeks    = var.vm_backup_policy.yearly_weeks
+    }
   }
 
   depends_on = [
@@ -76,33 +85,42 @@ resource "azurerm_backup_policy_file_share" "file_share_policy" {
   resource_group_name = var.resource_group_name
   recovery_vault_name = azurerm_recovery_services_vault.vault.name
 
-  timezone = "UTC"
+  timezone = var.fileshare_backup_policy.timezone
 
   backup {
     frequency = "Daily"
-    time      = "23:00"
+    time      = var.fileshare_backup_policy.time
   }
 
   retention_daily {
-    count = 14
+    count = var.fileshare_backup_policy.daily_count
   }
 
-  retention_weekly {
-    count    = 4
-    weekdays = ["Sunday"]
+  dynamic "retention_weekly" {
+    for_each = var.fileshare_backup_policy.weekly_count > 0 ? [1] : []
+    content {
+      count    = var.fileshare_backup_policy.weekly_count
+      weekdays = var.fileshare_backup_policy.weekly_weekdays
+    }
   }
 
-  retention_monthly {
-    count    = 12
-    weekdays = ["Monday"]
-    weeks    = ["First"]
+  dynamic "retention_monthly" {
+    for_each = var.fileshare_backup_policy.monthly_count > 0 ? [1] : []
+    content {
+      count    = var.fileshare_backup_policy.monthly_count
+      weekdays = var.fileshare_backup_policy.monthly_weekdays
+      weeks    = var.fileshare_backup_policy.monthly_weeks
+    }
   }
 
-  retention_yearly {
-    count    = 2
-    months   = ["December"]
-    weekdays = ["Sunday"]
-    weeks    = ["Last"]
+  dynamic "retention_yearly" {
+    for_each = var.fileshare_backup_policy.yearly_count > 0 ? [1] : []
+    content {
+      count    = var.fileshare_backup_policy.yearly_count
+      months   = var.fileshare_backup_policy.yearly_months
+      weekdays = var.fileshare_backup_policy.yearly_weekdays
+      weeks    = var.fileshare_backup_policy.yearly_weeks
+    }
   }
 
   depends_on = [

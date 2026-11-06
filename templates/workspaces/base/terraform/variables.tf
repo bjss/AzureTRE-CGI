@@ -105,6 +105,18 @@ variable "enable_backup" {
   description = "Enable backups for the workspace"
 }
 
+variable "vm_backup_policy" {
+  type        = string
+  default     = "e30="
+  description = "Base64-encoded JSON VM backup policy overrides"
+}
+
+variable "fileshare_backup_policy" {
+  type        = string
+  default     = "e30="
+  description = "Base64-encoded JSON file-share backup policy overrides"
+}
+
 # These variables are only passed in if you are not registering an AAD
 # application as they need passing back out
 variable "app_role_id_workspace_owner" {

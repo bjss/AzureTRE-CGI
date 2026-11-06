@@ -26,6 +26,43 @@ When deploying a workspace the following properties need to be configured.
 
 When `enable_backup` is set (the default) the base workspace deploys a Recovery Services Vault into the workspace resource group and protects the workspace's shared storage (and any VMs configured for backup).
 
+The updateable `vm_backup_policy` and `fileshare_backup_policy` workspace properties independently configure the two existing policies. Each is an object containing any of the following optional overrides. Omitting a property retains the original default; omitting an entire policy preserves existing behaviour on upgrade. Backup frequency remains daily.
+
+| Property | Default | Description |
+| -------- | ------- | ----------- |
+| `timezone` | `UTC` | Azure timezone name, such as `GMT Standard Time`. |
+| `time` | `22:00` for VMs; `23:00` for file shares | Daily backup time in the selected timezone, on the hour or half-hour. |
+| `daily_count` | `14` | Daily recovery points to retain. |
+| `weekly_count` | `4` | Weeks to retain; set to `0` to disable weekly retention. |
+| `weekly_weekdays` | `["Sunday"]` | Weekdays to retain. |
+| `monthly_count` | `12` | Months to retain; set to `0` to disable monthly retention. |
+| `monthly_weekdays`, `monthly_weeks` | `["Monday"]`, `["First"]` | Weekdays and weeks of each month to retain. |
+| `yearly_count` | `2` | Years to retain; set to `0` to disable yearly retention. |
+| `yearly_weekdays`, `yearly_weeks`, `yearly_months` | `["Sunday"]`, `["Last"]`, `["December"]` | Weekdays, weeks and months to retain. |
+
+For example, the following workspace properties configure the policies independently:
+
+```json
+{
+  "enable_backup": true,
+  "vm_backup_policy": {
+    "time": "21:30",
+    "daily_count": 30,
+    "weekly_weekdays": ["Saturday", "Sunday"]
+  },
+  "fileshare_backup_policy": {
+    "time": "23:30",
+    "daily_count": 21,
+    "yearly_count": 0
+  }
+}
+```
+
+Changing a policy affects all resources protected by that policy. Azure validates the timezone and policy combinations; in particular, Azure Files has a limit of 200 retained snapshots across its retention schedules.
+Reducing retention or disabling a retention period can shorten recovery-point availability. Review the impact before updating an existing workspace. These settings have no effect when backups are disabled.
+
+When updating a policy through the API, provide the complete policy override object: a PATCH replaces that object rather than merging its individual fields. Any omitted fields revert to their defaults.
+
 | `delete_backups_on_uninstall` | Behaviour on workspace deletion |
 | ----------------------------- | ------------------------------- |
 | `false` (default) | **Retain the backups.** Protection is stopped but the recovery points are kept. The vault, its backup resources and the workspace resource group are removed from the Terraform state, so the **resource group is retained and continues to hold the Recovery Services Vault and its recovery points** after the workspace is deleted. |

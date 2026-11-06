@@ -1,7 +1,7 @@
 ---
 schemaVersion: 1.0.0
 name: tre-workspace-base
-version: 2.12.4
+version: 2.13.0
 description: "A base Azure TRE workspace"
 dockerfile: Dockerfile.tmpl
 registry: azuretre
@@ -154,6 +154,14 @@ parameters:
     type: boolean
     default: true
     description: "Enable backups for the workspace, including the vm's & shared storage."
+  - name: vm_backup_policy
+    type: string
+    default: "e30="
+    description: "Base64-encoded JSON VM backup policy overrides."
+  - name: fileshare_backup_policy
+    type: string
+    default: "e30="
+    description: "Base64-encoded JSON file-share backup policy overrides."
   - name: delete_backups_on_uninstall
     type: boolean
     default: false
@@ -290,6 +298,8 @@ install:
         key_store_id: ${ bundle.parameters.key_store_id }
         storage_account_redundancy: ${ bundle.parameters.storage_account_redundancy }
         enable_backup: ${ bundle.parameters.enable_backup }
+        vm_backup_policy: ${ bundle.parameters.vm_backup_policy }
+        fileshare_backup_policy: ${ bundle.parameters.fileshare_backup_policy }
         enable_dns_policy: ${ bundle.parameters.enable_dns_policy }
         auto_grant_workspace_consent: ${ bundle.parameters.auto_grant_workspace_consent }
         enable_airlock_malware_scanning: ${ bundle.parameters.enable_airlock_malware_scanning }
@@ -352,6 +362,8 @@ upgrade:
         key_store_id: ${ bundle.parameters.key_store_id }
         storage_account_redundancy: ${ bundle.parameters.storage_account_redundancy }
         enable_backup: ${ bundle.parameters.enable_backup }
+        vm_backup_policy: ${ bundle.parameters.vm_backup_policy }
+        fileshare_backup_policy: ${ bundle.parameters.fileshare_backup_policy }
         enable_dns_policy: ${ bundle.parameters.enable_dns_policy }
         auto_grant_workspace_consent: ${ bundle.parameters.auto_grant_workspace_consent }
         enable_airlock_malware_scanning: ${ bundle.parameters.enable_airlock_malware_scanning }
@@ -452,6 +464,8 @@ uninstall:
         key_store_id: ${ bundle.parameters.key_store_id }
         storage_account_redundancy: ${ bundle.parameters.storage_account_redundancy }
         enable_backup: ${ bundle.parameters.enable_backup }
+        vm_backup_policy: ${ bundle.parameters.vm_backup_policy }
+        fileshare_backup_policy: ${ bundle.parameters.fileshare_backup_policy }
         enable_dns_policy: ${ bundle.parameters.enable_dns_policy }
         auto_grant_workspace_consent: ${ bundle.parameters.auto_grant_workspace_consent }
         enable_airlock_malware_scanning: ${ bundle.parameters.enable_airlock_malware_scanning }

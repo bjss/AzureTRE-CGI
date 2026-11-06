@@ -132,12 +132,14 @@ module "azure_monitor" {
 }
 
 module "backup" {
-  count                 = var.enable_backup ? 1 : 0
-  source                = "./backup"
-  tre_id                = var.tre_id
-  tre_resource_id       = var.tre_resource_id
-  location              = var.location
-  resource_group_name   = azurerm_resource_group.ws.name
-  tre_workspace_tags    = local.tre_workspace_tags
-  enable_cmk_encryption = var.enable_cmk_encryption
+  count                   = var.enable_backup ? 1 : 0
+  source                  = "./backup"
+  tre_id                  = var.tre_id
+  tre_resource_id         = var.tre_resource_id
+  location                = var.location
+  resource_group_name     = azurerm_resource_group.ws.name
+  tre_workspace_tags      = local.tre_workspace_tags
+  enable_cmk_encryption   = var.enable_cmk_encryption
+  vm_backup_policy        = jsondecode(base64decode(var.vm_backup_policy))
+  fileshare_backup_policy = jsondecode(base64decode(var.fileshare_backup_policy))
 }
