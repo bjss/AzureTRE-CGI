@@ -72,16 +72,19 @@ function createGitHubContext() {
         return func(params);
       },
       request: async (route, data) => {
-        if (route === 'GET /repos/{owner}/{repo}/collaborators/{username}') {
-          if (data.username === "admin") {
-            return {
-              status: 204
-            };
-          } else {
-            throw {
-              status: 404,
-            };
+        if (route === 'GET /repos/{owner}/{repo}/collaborators/{username}/permission') {
+          const permissions = {
+            admin: 'admin',
+            'team-writer': 'write',
+            'read-only': 'read',
+          };
+          if (data.username === 'api-error') {
+            throw { status: 500, response: { data: { message: 'Server Error' } } };
           }
+          if (permissions[data.username]) {
+            return { status: 200, data: { permission: permissions[data.username] } };
+          }
+          throw { status: 404 };
         }
       },
       rest: {

@@ -9,7 +9,7 @@ const { createHash } = require('crypto');
 const SKIP_DEPLOYMENT_FLAG = "skip_deployment";
 const ACCEPT_NEXUS_EULA_FLAG = "accept_nexus_eula";
 
-async function getCommandFromComment({ core, context, github }) {
+async function getCommandFromComment({ core, context, github, permissionGithub = github }) {
   const commentUsername = context.payload.comment.user.login;
   const repoFullName = context.payload.repository.full_name;
   const repoParts = repoFullName.split("/");
@@ -59,7 +59,7 @@ async function getCommandFromComment({ core, context, github }) {
   const trimmedFirstLine = commentFirstLine.trim();
   if (trimmedFirstLine[0] === "/") {
     // only allow actions for users with write access
-    if (!await userHasWriteAccessToRepo({ core, github }, commentUsername, repoOwner, repoName)) {
+    if (!await userHasWriteAccessToRepo({ core, github: permissionGithub }, commentUsername, repoOwner, repoName)) {
       core.notice("Command: none - user doesn't have write permission]");
       await github.rest.issues.createComment({
         owner: repoOwner,
@@ -85,7 +85,7 @@ async function getCommandFromComment({ core, context, github }) {
             break;
           }
 
-          const runTests = await handleTestCommand({ core, github }, parts, "tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests";
             skipDeployment = commandHasSkipDeploymentFlag(parts);
@@ -95,7 +95,7 @@ async function getCommandFromComment({ core, context, github }) {
 
       case "/test-extended":
         {
-          const runTests = await handleTestCommand({ core, github }, parts, "extended tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "extended tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests-extended";
             skipDeployment = commandHasSkipDeploymentFlag(parts);
@@ -110,7 +110,7 @@ async function getCommandFromComment({ core, context, github }) {
             break;
           }
 
-          const runTests = await handleTestCommand({ core, github }, parts, "extended AAD tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "extended AAD tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests-extended-aad";
           }
@@ -138,7 +138,7 @@ async function getCommandFromComment({ core, context, github }) {
             break;
           }
 
-          const runTests = await handleTestCommand({ core, github }, parts, "shared service tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "shared service tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests-shared-services";
             acceptNexusEula = true;
@@ -153,7 +153,7 @@ async function getCommandFromComment({ core, context, github }) {
             break;
           }
 
-          const runTests = await handleTestCommand({ core, github }, parts, "backup tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "backup tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests-backups";
           }
@@ -175,7 +175,7 @@ async function getCommandFromComment({ core, context, github }) {
             break;
           }
 
-          const runTests = await handleTestCommand({ core, github }, parts, "airlock tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
+          const runTests = await handleTestCommand({ core, github, permissionGithub }, parts, "airlock tests", runId, { number: prNumber, authorUsername: prAuthorUsername, repoOwner, repoName, headSha: prHeadSha, refId: prRefId, details: pr }, { username: commentUsername, link: commentLink });
           if (runTests) {
             command = "run-tests-airlock";
             acceptNexusEula = consentFlags.length === 1;
@@ -213,7 +213,7 @@ async function getCommandFromComment({ core, context, github }) {
   return command;
 }
 
-async function handleTestCommand({ core, github }, commandParts, testDescription, runId, pr, comment) {
+async function handleTestCommand({ core, github, permissionGithub }, commandParts, testDescription, runId, pr, comment) {
 
   if (!pr.details.mergeable) {
     // Since we use the potential merge commit as the ref to checkout, we can only run if there is such a commit
@@ -227,7 +227,7 @@ async function handleTestCommand({ core, github }, commandParts, testDescription
   // if so, need to specify the SHA that has been vetted and check that it matches
   // the latest head SHA for the PR
   const command = commandParts[0]
-  const prAuthorHasWriteAccess = await userHasWriteAccessToRepo({ core, github }, pr.authorUsername, pr.repoOwner, pr.repoName);
+  const prAuthorHasWriteAccess = await userHasWriteAccessToRepo({ core, github: permissionGithub }, pr.authorUsername, pr.repoOwner, pr.repoName);
   const externalPr = !prAuthorHasWriteAccess;
   if (externalPr) {
     const commentSha = getShaFromCommandParts(commandParts);
@@ -282,12 +282,12 @@ async function prContainsNonDocChanges(github, repoOwner, repoName, prNumber) {
   return gotNonDocChanges;
 }
 
-async function labelAsExternalIfAuthorDoesNotHaveWriteAccess({ core, context, github }) {
+async function labelAsExternalIfAuthorDoesNotHaveWriteAccess({ core, context, github, permissionGithub = github }) {
   const username = context.payload.pull_request.user.login;
   const owner = context.repo.owner;
   const repo = context.repo.repo;
 
-  if (!await userHasWriteAccessToRepo({ core, github }, username, owner, repo)) {
+  if (!await userHasWriteAccessToRepo({ core, github: permissionGithub }, username, owner, repo)) {
     core.info("Adding external label to PR " + context.payload.pull_request.number)
     await github.rest.issues.addLabels({
       owner,
@@ -303,21 +303,27 @@ async function userHasWriteAccessToRepo({ core, github }, username, repoOwner, r
   // Unfortunately, that always shows MEMBER if you are in the microsoft org and have that set to publicly visible
   // (Can check via https://github.com/orgs/microsoft/people?query=<username>)
 
-  // https://docs.github.com/en/rest/reference/collaborators#check-if-a-user-is-a-repository-collaborator
+  // The check-if-collaborator endpoint returns 204 for any access level (including read) and, with the
+  // default GITHUB_TOKEN, 404 for users whose access comes only from an organisation team.
+  // Use the permission endpoint instead and require an explicit write-level permission.
+  // https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user
+  // `permission` is the legacy field: admin, write, read or none (maintain maps to write, triage to read).
   let userHasWriteAccess = false;
   try {
     core.info(`Checking if user "${username}" has write access to ${repoOwner}/${repoName} ...`)
-    const result = await github.request('GET /repos/{owner}/{repo}/collaborators/{username}', {
+    const result = await github.request('GET /repos/{owner}/{repo}/collaborators/{username}/permission', {
       owner: repoOwner,
       repo: repoName,
       username
     });
-    userHasWriteAccess = result.status === 204;
+    const permission = result.data?.permission;
+    core.info(`User permission: ${permission}`);
+    userHasWriteAccess = permission === 'admin' || permission === 'write';
   } catch (err) {
     if (err.status === 404) {
       core.info("User not found in collaborators");
     } else {
-      core.error(`Error checking if user has write access: ${err.status} (${err.response.data.message}) `)
+      core.error(`Error checking if user has write access: ${err.status} (${err.response?.data?.message}) `)
     }
   }
   core.info("User has write access: " + userHasWriteAccess);
