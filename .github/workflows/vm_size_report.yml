@@ -110,6 +110,32 @@ jobs:
             --link-base "$LINK_BASE" --output vm-size-report.md
           cat vm-size-report.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: "Test only: the identity cannot read other resources"
+        run: |
+          # Error text can name the subscription, so the step prints only counts and results.
+          failed=0
+          for kind in group keyvault storage; do
+            case "$kind" in
+              group) count=$(az group list --query "length(@)" -o tsv 2>/dev/null || echo error) ;;
+              keyvault) count=$(az keyvault list --query "length(@)" -o tsv 2>/dev/null || echo error) ;;
+              storage) count=$(az storage account list --query "length(@)" -o tsv 2>/dev/null || echo error) ;;
+            esac
+            echo "$kind list: $count"
+            if [ "$count" != "0" ] && [ "$count" != "error" ]; then failed=1; fi
+          done
+          if az group show --name rg-mgmt-uks-01 --output none >/dev/null 2>&1; then
+            echo "group show rg-mgmt-uks-01: allowed"
+            failed=1
+          else
+            echo "group show rg-mgmt-uks-01: refused"
+          fi
+          if az role assignment list --all --query "length(@)" -o tsv >/dev/null 2>&1; then
+            echo "role assignment list: allowed"
+          else
+            echo "role assignment list: refused"
+          fi
+          exit "$failed"
+
       - name: Upload the report
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
