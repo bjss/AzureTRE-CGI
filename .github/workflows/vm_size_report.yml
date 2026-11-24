@@ -6,7 +6,8 @@ on: # yamllint disable-line rule:truthy
     inputs:
       region:
         description: >-
-          Region: the Azure region to check. ci-location is the LOCATION variable of the CICD environment.
+          Region: the Azure region to check. ci-location is the LOCATION variable of the repository or of the
+          vm-size-report environment.
           Select none to check only the regions in More regions.
         type: choice
         default: ci-location
@@ -52,8 +53,9 @@ jobs:
   report:
     name: Report VM size availability
     runs-on: ubuntu-26.04
-    # The federated credential of the CI identity trusts this environment.
-    environment: CICD
+    # The federated credential of the report identity trusts this environment. This identity can only read
+    # VM sizes. Do not use the CICD environment, because its identity can change resources.
+    environment: vm-size-report
     timeout-minutes: 15
     permissions:
       contents: read
@@ -64,10 +66,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check the report identity
+        env:
+          CLIENT_ID: ${{ vars.VM_SIZE_REPORT_CLIENT_ID }}
+        run: |
+          if [ -z "$CLIENT_ID" ]; then
+            echo "::error::Set the VM_SIZE_REPORT_CLIENT_ID variable. See docs/tre-admins/vm-size-availability.md."
+            exit 1
+          fi
+
       - name: Azure Login
         uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ vars.VM_SIZE_REPORT_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           environment: ${{ vars.AZURE_ENVIRONMENT || secrets.AZURE_ENVIRONMENT || 'AzureCloud' }}
@@ -83,7 +94,7 @@ jobs:
             none) regions="$MORE_REGIONS" ;;
             ci-location)
               if [ -z "$CI_LOCATION" ]; then
-                echo "::error::The CICD environment has no LOCATION variable. Select a region."
+                echo "::error::The LOCATION variable is not set. Select a region."
                 exit 1
               fi
               regions="$CI_LOCATION,$MORE_REGIONS"

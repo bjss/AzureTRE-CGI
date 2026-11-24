@@ -10,7 +10,7 @@ You need:
 
 - A clone of the repository. The script reads the files that git tracks.
 - Python 3 and the Azure CLI. The [development container](setup-instructions/prerequisites.md#development-container) has both.
-- The Reader role on the subscription.
+- A role on the subscription with the actions `Microsoft.Compute/skus/read` and `Microsoft.MachineLearningServices/locations/vmsizes/read`, for example Reader.
 
 1. Log in to Azure with `az login`.
 1. Select the subscription with `az account set --subscription <subscription-id>`. You can also give the script the option `--subscription <subscription-id>`.
@@ -24,11 +24,52 @@ To check more than one region, separate the regions with commas, for example `--
 
 If you do not give a region, the script checks the names against the catalogue only. It does not use Azure.
 
+## Set up the GitHub workflow
+
+The workflow uses the GitHub environment `vm-size-report` and its own identity. This identity can only read VM sizes. The workflow does not use the `CICD` environment, because the identity of that environment can change resources.
+
+1. Create a custom role that the subscription can assign:
+
+    ```json
+    {
+      "Name": "TRE VM Size Reader",
+      "Description": "Read the VM sizes and the Azure ML VM sizes of the subscription for the VM size report.",
+      "Actions": ["Microsoft.Compute/skus/read", "Microsoft.MachineLearningServices/locations/vmsizes/read"],
+      "NotActions": [],
+      "AssignableScopes": ["/subscriptions/<subscription-id>"]
+    }
+    ```
+
+    ```bash
+    az role definition create --role-definition @tre-vm-size-reader.json
+    ```
+
+1. Create a user-assigned managed identity, and give it the role on the subscription:
+
+    ```bash
+    az identity create --resource-group <resource-group> --name id-tre-vm-size-report
+    az role assignment create --assignee-object-id <principal-id> --assignee-principal-type ServicePrincipal \
+      --role "TRE VM Size Reader" --scope /subscriptions/<subscription-id>
+    ```
+
+1. Add a federated credential for the `vm-size-report` environment to the identity:
+
+    ```bash
+    az identity federated-credential create --resource-group <resource-group> --identity-name id-tre-vm-size-report \
+      --name github-vm-size-report --issuer https://token.actions.githubusercontent.com \
+      --audiences api://AzureADTokenExchange --subject "repo:<owner>/<repository>:environment:vm-size-report"
+    ```
+
+    The subject must be the `sub` claim that GitHub gives to a job in this environment. If the repository has a custom format for this claim, `gh api repos/<owner>/<repository>/actions/oidc/customization/sub` shows it.
+
+1. In GitHub, create the environment `vm-size-report`. Set its variable `VM_SIZE_REPORT_CLIENT_ID` to the client ID of the identity.
+1. The workflow also uses the secrets `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` and the variable `LOCATION`. If the repository has these values only in the `CICD` environment, add them to the `vm-size-report` environment too.
+
 ## Run the GitHub workflow
 
 1. In GitHub, open **Actions** and select **VM Size Availability**.
 1. Select **Run workflow**.
-1. In **Region**, select a region. The default `ci-location` is the `LOCATION` variable of the `CICD` environment.
+1. In **Region**, select a region. The default `ci-location` is the `LOCATION` variable of the repository or of the `vm-size-report` environment.
 1. To check more regions, type them in **More regions**, separated by commas. To check only these regions, select `none` in **Region**.
 
 You can also start the workflow with the GitHub CLI:
@@ -37,11 +78,11 @@ You can also start the workflow with the GitHub CLI:
 gh workflow run vm_size_report.yml -f region=none -f more_regions=uksouth,eastus2
 ```
 
-The workflow logs in to Azure with the identity of the `CICD` environment. The report shows on the summary page of the run. The report is also in the `vm-size-report` artifact for 7 days. The workflow leaves the subscription out of the report, because anyone can see the run of a public repository.
+The workflow logs in to Azure with the identity of the `vm-size-report` environment. The report shows on the summary page of the run. The report is also in the `vm-size-report` artifact for 7 days. The workflow leaves the subscription out of the report, because anyone can see the run of a public repository.
 
 GitHub shows **Run workflow** only when the workflow file is on the default branch.
 
-The workflow runs only when a person starts it. It does not start on a push or on a pull request, because the identity of the `CICD` environment can change resources. An automatic run on branch pushes needs a separate identity that can only read.
+The workflow runs only when a person starts it.
 
 ## Read the report
 

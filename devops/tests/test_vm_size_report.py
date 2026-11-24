@@ -3,6 +3,7 @@
 import datetime
 import io
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -275,6 +276,15 @@ class AzureMlReportTests(unittest.TestCase):
                 ["`Standard_DS2_v2`", "AML cluster", "➖ not checked"],
             ],
         )
+
+
+class WorkflowTests(unittest.TestCase):
+    def test_workflow_logs_in_with_the_read_only_identity(self):
+        # Anyone with write access can start the workflow from any branch. The identity of the CICD
+        # environment can change resources, so the workflow uses an identity that can only read VM sizes.
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/vm_size_report.yml").read_text()
+        self.assertEqual(re.findall(r"^    environment: (\S+)$", workflow, re.M), ["vm-size-report"])
+        self.assertEqual(re.findall(r"client-id: (.+)$", workflow, re.M), ["${{ vars.VM_SIZE_REPORT_CLIENT_ID }}"])
 
 
 class CatalogueTests(unittest.TestCase):
