@@ -101,6 +101,9 @@ fi
 
 
 # shellcheck disable=SC1091
+source "$(dirname "$0")/terraform_init.sh"
+
+# shellcheck disable=SC1091
 source "$(dirname "$0")/storage_enable_public_access.sh" \
   --storage-account-name "${mgmt_storage_account_name}" \
   --resource-group-name "${mgmt_resource_group_name}"
@@ -108,11 +111,16 @@ source "$(dirname "$0")/storage_enable_public_access.sh" \
 # Change directory to $DIR
 pushd "$DIR" > /dev/null
 
-terraform init -input=false -backend=true -reconfigure \
+# A new role on the state storage account can take some minutes to work.
+# Retry a permission failure that Terraform reports before it locks the state.
+if ! retry_with_backoff init_terraform "" \
     -backend-config="resource_group_name=${mgmt_resource_group_name}" \
     -backend-config="storage_account_name=${mgmt_storage_account_name}" \
     -backend-config="container_name=${container_name}" \
-    -backend-config="key=${key}"
+    -backend-config="key=${key}"; then
+  echo "ERROR: Terraform backend initialisation failed. See the error above." >&2
+  exit 1
+fi
 
 RUN_COMMAND=1
 while [ $RUN_COMMAND = 1 ]

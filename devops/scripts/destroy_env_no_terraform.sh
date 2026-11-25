@@ -83,6 +83,34 @@ if [[ -z "${matching_resource_groups}" ]]; then
   exit 0
 fi
 
+# delete container repositories individually otherwise defender doesn't purge image scans
+function purge_container_repositories() {
+  local rg=$1
+
+  local acrs
+  acrs=$(az acr list --resource-group "$rg" --query [].name --output tsv)
+
+  local acr
+  for acr in $acrs; do
+    echo "Found container registry ${acr}, deleting repositories..."
+
+    local repositories
+    repositories=$(az acr repository list --name "$acr" --output tsv)
+
+    local repository
+    for repository in $repositories; do
+        echo "  Deleting: $repository"
+        az acr repository delete --name "$acr" --repository "$repository" --yes --output none
+    done
+  done
+}
+
+# Purge the repositories of all groups before the slow steps. The Azure CLI gets a new token for a container registry.
+# After some long group deletes, the sign-in of a CI job can be too old to get a new token.
+while read -r rg_item; do
+  purge_container_repositories "$rg_item"
+done <<< "${matching_resource_groups}"
+
 # Use the same successful inventory for core existence and deletion decisions.
 core_group_exists=false
 while IFS= read -r rg_name; do
@@ -175,37 +203,32 @@ else
   echo "Skipping core resource group cleanup (locks, diagnostics, keyvault and log analytics linked storage) because ${core_tre_rg} was not found."
 fi
 
-# delete container repositories individually otherwise defender doesn't purge image scans
-function purge_container_repositories() {
-  local rg=$1
-
-  local acrs
-  acrs=$(az acr list --resource-group "$rg" --query [].name --output tsv)
-
-  local acr
-  for acr in $acrs; do
-    echo "Found container registry ${acr}, deleting repositories..."
-
-    local repositories
-    repositories=$(az acr repository list --name "$acr" --output tsv)
-
-    local repository
-    for repository in $repositories; do
-        echo "  Deleting: $repository"
-        az acr repository delete --name "$acr" --repository "$repository" --yes --output none
-    done
-  done
+# Azure keeps a backup vault in soft delete for some days, and the vault blocks the delete of its group.
+# The E2E backup test tags that group with an e2e_delete_after date. Keep the group until the end of that date.
+function kept_on_purpose() {
+  local delete_after
+  delete_after=$(az group show --name "$1" --query "tags.e2e_delete_after" -o tsv) || return 1
+  [[ "${delete_after}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  (( 10#${delete_after//-/} >= 10#$(date -u +%Y%m%d) )) || return 1
+  echo "Resource group $1 has the tag e2e_delete_after=${delete_after}. The destroy keeps it on purpose. Delete it after that date."
 }
 
 # this will find the mgmt, core resource groups as well as any workspace ones
 # we are reverse-sorting to first delete the workspace groups (might not be
 # good enough because we use no-wait sometimes)
-echo "${matching_resource_groups}" |
+# A failed group delete does not stop the destroy of the other groups. The script fails at the end.
+failed_groups=()
 while read -r rg_item; do
-  purge_container_repositories "$rg_item"
-
   echo "Deleting resource group: ${rg_item}"
   # remove any resource locks on resources inside the resource group
   az lock list --resource-group "${rg_item}" --query "[].id" -o tsv | xargs -r -I {} az lock delete --id "{}"
-  az group delete --resource-group "${rg_item}" --yes ${no_wait_option}
-done
+  if ! az group delete --resource-group "${rg_item}" --yes ${no_wait_option} && ! kept_on_purpose "${rg_item}"; then
+    echo "ERROR: Could not delete resource group ${rg_item}. The destroy continues with the other groups." >&2
+    failed_groups+=("${rg_item}")
+  fi
+done <<< "${matching_resource_groups}"
+
+if (( ${#failed_groups[@]} )); then
+  echo "ERROR: Could not delete these resource groups: ${failed_groups[*]}" >&2
+  exit 1
+fi

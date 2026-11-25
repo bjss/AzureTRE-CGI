@@ -40,6 +40,49 @@ To start a processor container manually:
   docker run -v /var/run/docker.sock:/var/run/docker.sock --env-file .env --name resource_processor_vmss_porter_debug [runner_image:tag]
   ```
 
+## A scale set instance stays in the state Updating
+
+The core deploy reimages the resource processor instances after each change of their custom data. Azure also updates these instances, for example for an automatic OS image upgrade or an automatic repair. If Azure updates an instance at the same time as the deploy, the instance can stay in the state "Updating" for a long time.
+
+The deploy runs `core/terraform/resource_processor/vmss_porter/reimage_instances.sh` for the reimage. A busy instance is in a state such as "Updating", "Creating" or "Deleting". The script does these steps:
+
+1. It waits up to 5 minutes until no instance is busy. If an instance stays busy or is in the state "Failed", the script replaces all instances and does not reimage them.
+1. It reimages all instances, and waits up to 12 minutes until Azure ends the reimage. Then it reads the state of each instance. If an instance is not in the state "Succeeded", the script replaces this instance.
+1. To replace instances, the script deletes them. Then it scales the scale set back to its capacity. A new instance uses the current model of the scale set, so it gets the new custom data.
+1. If an instance is not in the state "Succeeded" about 10 minutes after the start of the replace, the deploy fails with a message that names the scale set.
+1. If the reimage fails or does not end in 12 minutes, but all instances are in the state "Succeeded", the deploy fails and does not replace the instances. Look for the Azure CLI error in the deploy log.
+1. Each Azure CLI call other than the reimage has a time limit of 1 minute. If a read of the instances fails during a wait, the script reads them again at the next check. If the last read of a wait or another call fails, the deploy fails. The deploy log shows if the time limit of the call ended.
+
+With the default values, the script ends in less than 30 minutes.
+
+If the deploy fails with this message, repair the scale set manually:
+
+1. Show the state of each instance:
+
+   ```bash
+   az vmss list-instances --name vmss-rp-porter-<TRE_ID> --resource-group rg-<TRE_ID> --query "[].{id:instanceId, state:provisioningState}" --output table
+   ```
+
+1. Get the capacity of the scale set. Do this before the delete, because the delete decreases the capacity.
+
+   ```bash
+   az vmss show --name vmss-rp-porter-<TRE_ID> --resource-group rg-<TRE_ID> --query sku.capacity --output tsv
+   ```
+
+1. Delete each instance that is not in the state "Succeeded":
+
+   ```bash
+   az vmss delete-instances --name vmss-rp-porter-<TRE_ID> --resource-group rg-<TRE_ID> --instance-ids <INSTANCE_ID>
+   ```
+
+1. Scale the scale set back to the capacity from step 2:
+
+   ```bash
+   az vmss scale --name vmss-rp-porter-<TRE_ID> --resource-group rg-<TRE_ID> --new-capacity <CAPACITY>
+   ```
+
+1. Make sure that each instance is in the state "Succeeded" (step 1). Then run the core deploy again.
+
 ## Logs
 
 All logs from the resource processor are transferred to the App Insights instance, so it is not usually necessary to follow the progress by logging into the instance.
