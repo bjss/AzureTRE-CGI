@@ -149,6 +149,12 @@ variable "ci_git_ref" {
   type        = string
 }
 
+variable "ci_repository" {
+  default     = ""
+  description = "The GitHub repository (owner/name) whose CI deployed this TRE. Empty outside CI."
+  type        = string
+}
+
 variable "enable_local_debugging" {
   default     = false
   description = "This will allow Cosmos to be accessible from your local IP address and add some extra role permissions."
@@ -172,6 +178,12 @@ variable "enable_airlock_malware_scanning" {
   type        = bool
   default     = false
   description = "If False, Airlock requests will skip the malware scanning stage"
+}
+
+variable "enable_legacy_airlock" {
+  type        = bool
+  default     = true
+  description = "Deploy v1 legacy per-stage airlock storage accounts in core. Required for workspaces using airlock_version=1."
 }
 
 variable "enable_airlock_email_check" {
