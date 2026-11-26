@@ -117,9 +117,6 @@ on: # yamllint disable-line rule:truthy
       TEST_ACCOUNT_CLIENT_SECRET:
         description: ""
         required: true
-      TEST_AML_USER_OBJECT_ID:
-        description: ""
-        required: false
       TRE_ID:
         description: ""
         required: true
@@ -549,8 +546,6 @@ jobs:
             BUNDLE_DIR: "./templates/workspace_services/guacamole/user_resources/guacamole-azure-export-reviewvm"
           - BUNDLE_TYPE: "user_resource"
             BUNDLE_DIR: "./templates/workspace_services/guacamole/user_resources/guacamole-azure-import-reviewvm"
-          - BUNDLE_TYPE: "user_resource"
-            BUNDLE_DIR: "./templates/workspace_services/azureml/user_resources/aml_compute"
     environment: ${{ inputs.environmentName }}
     steps:
       - name: Checkout
@@ -782,9 +777,6 @@ jobs:
           - BUNDLE_TYPE: "user_resource"
             BUNDLE_DIR: "./templates/workspace_services/guacamole/user_resources/guacamole-azure-import-reviewvm"
             WORKSPACE_SERVICE_NAME: "tre-service-guacamole"
-          - BUNDLE_TYPE: "user_resource"
-            BUNDLE_DIR: "./templates/workspace_services/azureml/user_resources/aml_compute"
-            WORKSPACE_SERVICE_NAME: "tre-service-azureml"
     environment: ${{ inputs.environmentName }}
     steps:
       - name: Checkout
@@ -1018,6 +1010,11 @@ jobs:
       matrix:
         group: ${{ fromJSON(needs.e2e_tests_plan.outputs.groups) }}
     steps:
+      # The lifecycle cases of this group share one absolute deadline 270 minutes after the job
+      # start, as in the bundle job. A later case starts only if its clean-up time remains.
+      - name: Reserve lifecycle cleanup and reporting time
+        run: echo "LIFECYCLE_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -1034,7 +1031,20 @@ jobs:
       - name: Run E2E Tests
         uses: ./.github/actions/devcontainer_run_command
         with:
-          COMMAND: "TEST_ACCEPT_NEXUS_EULA=${{ inputs.acceptNexusEula }} TEST_RUN_CERTIFICATE_TESTS_ON_WEEKENDS=${{ inputs.runCertificateTestsOnWeekends }} make test-e2e-ci-group"
+          COMMAND: >-
+            TEST_ACCEPT_NEXUS_EULA=${{ inputs.acceptNexusEula }}
+            TEST_RUN_CERTIFICATE_TESTS_ON_WEEKENDS=${{ inputs.runCertificateTestsOnWeekends }}
+            BACKUP_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            AIRLOCK_MIGRATION_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            AIRLOCK_UPGRADE_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            PORTER_UPGRADE_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            SQL_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            MYSQL_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            GITEA_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            HEALTH_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            CYCLECLOUD_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            OHDSI_VALIDATION_DEADLINE=${{ env.LIFECYCLE_VALIDATION_DEADLINE }}
+            make test-e2e-ci-group
           DEVCONTAINER_TAG: ${{ inputs.DEVCONTAINER_TAG }}
           CI_CACHE_ACR_NAME: ${{ secrets.CI_CACHE_ACR_NAME}}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -1077,25 +1087,15 @@ jobs:
       [deploy_shared_services, register_bundles, register_user_resource_bundles, e2e_tests_smoke]
     timeout-minutes: 300
     steps:
-      - name: Reserve AML cleanup and reporting time
-        if: inputs.e2eBundle == 'tre-service-azureml' || inputs.e2eBundle == 'tre-user-resource-aml-compute-instance'
-        run: echo "AML_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
-
-      - name: Reserve OHDSI cleanup and reporting time
-        if: inputs.e2eBundle == 'tre-workspace-service-ohdsi'
-        run: echo "OHDSI_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
-
+      # The job timeout is 300 minutes. Each step below sets an absolute deadline 270 minutes
+      # (270 * 60 seconds) after the job start. The lifecycle helper keeps the last 120 minutes
+      # before the deadline for the clean-up. The 30 minutes after the deadline are for the report.
       - name: Reserve CycleCloud cleanup and reporting time
         if: inputs.e2eBundle == 'tre-shared-service-cyclecloud'
         run: echo "CYCLECLOUD_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
-
-      - name: Reserve Databricks cleanup and reporting time
-        if: inputs.e2eBundle == 'tre-service-databricks' || inputs.e2eBundle == 'tre-shared-service-databricks-private-auth'
-        run: echo "DATABRICKS_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
-
-      - name: Reserve export review cleanup and reporting time
-        if: inputs.e2eBundle == 'tre-service-guacamole-export-reviewvm'
-        run: echo "EXPORT_REVIEW_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
+      - name: Reserve OHDSI cleanup and reporting time
+        if: inputs.e2eBundle == 'tre-workspace-service-ohdsi'
+        run: echo "OHDSI_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
 
       - name: Reserve SQL cleanup and reporting time
         if: inputs.e2eBundle == 'tre-workspace-service-azuresql'
@@ -1105,13 +1105,12 @@ jobs:
         if: inputs.e2eBundle == 'tre-workspace-service-mysql'
         run: echo "MYSQL_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
 
-      - name: Reserve Health cleanup and reporting time
-        if: inputs.e2eBundle == 'tre-workspace-service-health'
-        run: echo "HEALTH_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
-
       - name: Reserve Gitea cleanup and reporting time
         if: inputs.e2eBundle == 'tre-workspace-service-gitea'
         run: echo "GITEA_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
+      - name: Reserve Health cleanup and reporting time
+        if: inputs.e2eBundle == 'tre-workspace-service-health'
+        run: echo "HEALTH_VALIDATION_DEADLINE=$(( $(date +%s) + 270 * 60 ))" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -1141,13 +1140,10 @@ jobs:
             TEST_RUN_CERTIFICATE_TESTS_ON_WEEKENDS=${{ inputs.runCertificateTestsOnWeekends }}
             SQL_VALIDATION_DEADLINE=${{ env.SQL_VALIDATION_DEADLINE }}
             MYSQL_VALIDATION_DEADLINE=${{ env.MYSQL_VALIDATION_DEADLINE }}
-            HEALTH_VALIDATION_DEADLINE=${{ env.HEALTH_VALIDATION_DEADLINE }}
             GITEA_VALIDATION_DEADLINE=${{ env.GITEA_VALIDATION_DEADLINE }}
-            EXPORT_REVIEW_VALIDATION_DEADLINE=${{ env.EXPORT_REVIEW_VALIDATION_DEADLINE }}
-            AML_VALIDATION_DEADLINE=${{ env.AML_VALIDATION_DEADLINE }}
-            DATABRICKS_VALIDATION_DEADLINE=${{ env.DATABRICKS_VALIDATION_DEADLINE }}
             CYCLECLOUD_VALIDATION_DEADLINE=${{ env.CYCLECLOUD_VALIDATION_DEADLINE }}
             OHDSI_VALIDATION_DEADLINE=${{ env.OHDSI_VALIDATION_DEADLINE }}
+            HEALTH_VALIDATION_DEADLINE=${{ env.HEALTH_VALIDATION_DEADLINE }}
             TEST_BUNDLE_REQUEST_FILE=e2e_tests/bundle-validation-request.json make test-e2e-bundle
           DEVCONTAINER_TAG: ${{ inputs.DEVCONTAINER_TAG }}
           CI_CACHE_ACR_NAME: ${{ secrets.CI_CACHE_ACR_NAME}}
@@ -1158,7 +1154,6 @@ jobs:
           LOCATION: ${{ vars.LOCATION }}
           API_CLIENT_ID: "${{ secrets.API_CLIENT_ID }}"
           AAD_TENANT_ID: "${{ secrets.AAD_TENANT_ID }}"
-          TEST_AML_USER_OBJECT_ID: "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
           TEST_APP_ID: "${{ secrets.TEST_APP_ID }}"
           TEST_WORKSPACE_APP_ID: "${{ secrets.TEST_WORKSPACE_APP_ID }}"
           TEST_WORKSPACE_APP_SECRET: "${{ secrets.TEST_WORKSPACE_APP_SECRET }}"

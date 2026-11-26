@@ -1,6 +1,7 @@
-"""Exercise a private Gitea repository across an update and an app restart."""
+"""Exercise a private Gitea repository across an update, a stop and a start of the app."""
 
 import asyncio
+from datetime import datetime, timezone
 from functools import partial
 import logging
 import os
@@ -12,7 +13,12 @@ from e2e_tests import config
 from e2e_tests.conftest import get_workspace_owner_token
 from e2e_tests.resources import strings
 from e2e_tests.resources.gitea_probe import run_probe
-from e2e_tests.resources.gitea_secrets import console_log_counts, key_vault_references
+from e2e_tests.resources.gitea_secrets import (
+    change_oidc_client_id,
+    console_log_counts,
+    key_vault_references,
+    oidc_stop_counts,
+)
 from e2e_tests.resources.resource import get_resource, post_resource
 from e2e_tests.resources.sql_lifecycle import sql_lifecycle
 from e2e_tests.resources.sql_probe import arm_client, COMPUTE_API, secret_access, validate_vm
@@ -54,14 +60,9 @@ async def test_private_gitea_repository_survives_update(verify):
         raise ValueError("The Gitea probe currently supports AzureCloud only")
     async with sql_lifecycle(verify, deadline_variable="GITEA_VALIDATION_DEADLINE") as resources:
         workspace_path, workspace_id, guacamole_path, guacamole_id = await resources.setup()
-        new_token = partial(get_workspace_owner_token, workspace_id, verify)
-        gitea_path, gitea_id = await resources.create(
-            GITEA_PAYLOAD, f"/api{workspace_path}/workspace-services", await new_token(), cleanup_token=new_token
-        )
-        vm_path, vm_id = await resources.create(
-            VM_PAYLOAD, f"/api{guacamole_path}/user-resources", await new_token(), cleanup_token=new_token
-        )
-        token = await new_token()
+        token = await get_workspace_owner_token(workspace_id, verify)
+        gitea_path, gitea_id = await resources.create(GITEA_PAYLOAD, f"/api{workspace_path}/workspace-services", token)
+        vm_path, vm_id = await resources.create(VM_PAYLOAD, f"/api{guacamole_path}/user-resources", token)
         gitea = (await get_resource(f"/api{gitea_path}", token, verify))["workspaceService"]
         vm_properties = (await get_resource(f"/api{vm_path}", token, verify))["userResource"]["properties"]
         subscription_id = vm_properties.get("workspace_subscription_id") or os.environ["ARM_SUBSCRIPTION_ID"]
@@ -71,6 +72,10 @@ async def test_private_gitea_repository_survives_update(verify):
         assert gitea["properties"]["connection_uri"] == f"{gitea_url}/"
         vault = f"kv-{f'{config.TRE_ID}-ws-{workspace_id[-4:]}'[-20:]}".lower()
         azure_vm_id = vm_properties["azure_resource_id"]
+        log_workspace = (
+            f"/subscriptions/{os.environ['ARM_SUBSCRIPTION_ID']}/resourceGroups/rg-{config.TRE_ID}"
+            f"/providers/Microsoft.OperationalInsights/workspaces/log-{config.TRE_ID}"
+        )
         async with arm_client() as arm:
             vm = await arm.request("GET", azure_vm_id, COMPUTE_API)
             group = validate_vm(vm, azure_vm_id, subscription_id, config.TRE_ID, workspace_id, guacamole_id, vm_id)
@@ -95,7 +100,6 @@ async def test_private_gitea_repository_survives_update(verify):
                 )
                 await probe(phase="write")
                 LOGGER.info("Gitea is private, rejects anonymous and wrong-password requests, and stores a commit")
-                token = await new_token()
                 gitea = (await get_resource(f"/api{gitea_path}", token, verify))["workspaceService"]
                 async with asyncio.timeout(60 * 60):
                     await post_resource(
@@ -106,20 +110,28 @@ async def test_private_gitea_repository_survives_update(verify):
                         method="PATCH",
                         etag=gitea["_etag"],
                     )
-                # A restart makes the app read the repository from the file share and MySQL again.
-                await arm.request("POST", f"{site_id}/restart", WEB_API)
+                # A new OIDC client ID changes the hash of the OIDC settings on the file share. The start script
+                # then stops Gitea one time, and App Service starts it again.
+                changed_at = datetime.now(timezone.utc)
+                await change_oidc_client_id(arm, site_id)
+                await oidc_stop_counts(arm, log_workspace, site_id, changed_at, settle=0)
+                LOGGER.info("Gitea stopped for the new OIDC settings and started again")
+                # A stop and a start make a new container read the repository from the file share and MySQL.
+                # A restart call returns before the restart, so the old container can serve the read.
+                restarted_at = datetime.now(timezone.utc)
+                await arm.request("POST", f"{site_id}/stop", WEB_API)
+                await arm.request("POST", f"{site_id}/start", WEB_API)
                 await probe(phase="read")
-                LOGGER.info("The Gitea repository survived the update and the restart")
+                LOGGER.info("The Gitea repository survived the update, the OIDC change, the stop and the start")
             # The web app sends its console log to Log Analytics, so the log must not show a secret.
             references = await key_vault_references(arm, site_id)
             assert set(references.values()) == {"Resolved"}, f"Gitea Key Vault references: {references}"
-            log_workspace = (
-                f"/subscriptions/{os.environ['ARM_SUBSCRIPTION_ID']}/resourceGroups/rg-{config.TRE_ID}"
-                f"/providers/Microsoft.OperationalInsights/workspaces/log-{config.TRE_ID}"
-            )
-            counts = await console_log_counts(arm, log_workspace, site_id)
+            counts = await console_log_counts(arm, log_workspace, site_id, restarted_at)
             LOGGER.info("Gitea console log lines: %s", counts)
             assert counts["leaks"] == 0, f"The Gitea console log has {counts['leaks']} lines with a secret"
+            # The start after the stop has the same OIDC settings, so it must not stop Gitea again.
+            stops = await oidc_stop_counts(arm, log_workspace, site_id, changed_at, settle=0)
+            assert stops["stops"] == 1, f"Gitea stopped {stops['stops']} times for one change of the OIDC settings"
             # Check the network settings last, so that a failure here keeps the functional evidence above.
             app = await arm.request("GET", site_id, WEB_API)
             server = await arm.request(

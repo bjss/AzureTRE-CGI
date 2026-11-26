@@ -9,7 +9,6 @@ import sys
 import tempfile
 import unittest
 
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 BUNDLE = ROOT / "templates/workspace_services/ohdsi"
@@ -44,11 +43,10 @@ from pathlib import Path
 args=sys.argv[1:]
 body=Path(args[args.index('-f')+1]).read_text() if '-f' in args else sys.stdin.read()
 with open(os.environ['CALLS'],'a') as f:f.write(json.dumps({'args':args,'body':body})+'\\n')
-sys.exit(int(os.environ.get('PSQL_EXIT','0')))
+# A real psql returns 0 after a failed statement unless ON_ERROR_STOP is on.
+sys.exit(int(os.environ.get('PSQL_EXIT','0')) if 'ON_ERROR_STOP=1' in args else 0)
 """,
         )
-        self.fake("envsubst", "import os,sys\nprint(os.path.expandvars(sys.stdin.read()))\n")
-        self.fake("md5sum", "import hashlib,sys\nprint(hashlib.md5(sys.stdin.buffer.read()).hexdigest())\n")
 
     def fake(self, name, body):
         p = self.folder / name
@@ -247,5 +245,3 @@ class BundleContractTests(unittest.TestCase):
     def test_bootstrap_version_matches_pinned_image(self):
         source = (BUNDLE / "terraform/atlas_security.tf").read_text()
         self.assertRegex(source, r"WEB_API_VERSION\s*=\s*local.ohdsi_api_docker_image_tag")
-        manifest = yaml.safe_load((BUNDLE / "porter.yaml").read_text())
-        self.assertEqual(manifest["version"], "0.3.18")

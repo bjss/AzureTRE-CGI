@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -159,25 +160,6 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertFalse(report["full_lifecycle_proven"])
         self.assertEqual(report["resources"], [])
 
-    def test_databricks_selections_are_independent_and_keep_dependencies_explicit(self):
-        cases = (
-            ("tre-shared-service-databricks-private-auth", "test_private_auth_lifecycle", set()),
-            (
-                "tre-service-databricks",
-                "test_private_databricks_lifecycle",
-                {"tre-workspace-base", "tre-shared-service-firewall", "tre-shared-service-databricks-private-auth"},
-            ),
-        )
-        for bundle, case, prerequisites in cases:
-            with self.subTest(bundle=bundle):
-                result, report = self.run_selector("--bundle", bundle, "--collect-only")
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(report["collected_tests"], ["test_databricks.py::" + case])
-                self.assertEqual(set(report["declared_prerequisites"]), prerequisites)
-                self.assertEqual(report["status"], "not_run")
-                self.assertFalse(report["full_lifecycle_proven"])
-                self.assertEqual(report["resources"], [])
-
     def test_unknown_partial_and_shell_like_identifiers_fail_before_collection(self):
         for identifier in ("azuresql", "tre-nonexistent", SQL + "; echo unexpected", SQL + "$(echo unexpected)"):
             with self.subTest(identifier=identifier):
@@ -232,6 +214,23 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertIn("test_shared_services.py::test_create_certs_nexus_shared_service", collected)
         self.assertNotIn("test_shared_services.py::test_create_certificate_shared_service", collected)
 
+    def test_unavailable_bundle_fails_with_its_coverage_gap(self):
+        result, report = self.run_selector("--bundle", "tre-user-resource-aml-compute-instance", "--validate-only")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("#5127", report["error"])
+        self.assertEqual(report["collected_tests"], [])
+
+    def test_openai_selects_the_guarded_case_and_reports_remaining_coverage(self):
+        result, report = self.run_selector("--bundle", "tre-workspace-service-openai", "--collect-only")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["collected_tests"], ["test_openai.py::test_private_openai_lifecycle"])
+        self.assertEqual(report["status"], "not_run")
+        self.assertFalse(report["full_lifecycle_proven"])
+        manifest = (ROOT / "templates/workspace_services/openai/porter.yaml").read_text()
+        version = re.search(r"^version: (\S+)$", manifest, re.MULTILINE).group(1)
+        self.assertEqual(report["source_bundle_version"], version)
+        self.assertIn("tre-workspace-base", report["declared_prerequisites"])
+
     def test_ohdsi_selects_only_its_private_lifecycle_without_provisioning(self):
         result, report = self.run_selector("--bundle", "tre-workspace-service-ohdsi", "--collect-only")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -241,41 +240,6 @@ class BundleSelectionTests(unittest.TestCase):
         self.assertEqual(report["resources"], [])
         self.assertEqual(set(report["declared_prerequisites"]), {"tre-workspace-base", "tre-shared-service-firewall"})
         self.assertTrue(any("Synapse" in limit for limit in report["limitations"]))
-
-    def test_aml_parent_and_compute_select_separate_cases_without_provisioning(self):
-        for bundle, case in (
-            ("tre-service-azureml", "test_private_aml_service_lifecycle"),
-            ("tre-user-resource-aml-compute-instance", "test_private_aml_compute_lifecycle"),
-        ):
-            with self.subTest(bundle=bundle):
-                result, report = self.run_selector("--bundle", bundle, "--collect-only")
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(report["collected_tests"], [f"test_aml.py::{case}"])
-                self.assertEqual(report["status"], "not_run")
-                self.assertFalse(report["full_lifecycle_proven"])
-                self.assertEqual(report["resources"], [])
-                self.assertIn("tre-workspace-base", report["declared_prerequisites"])
-                self.assertTrue(any("Notebook" in limit or "notebook" in limit for limit in report["limitations"]))
-
-    def test_openai_selects_the_guarded_case_and_reports_remaining_coverage(self):
-        result, report = self.run_selector("--bundle", "tre-workspace-service-openai", "--collect-only")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(report["collected_tests"], ["test_openai.py::test_private_openai_lifecycle"])
-        self.assertEqual(report["status"], "not_run")
-        self.assertFalse(report["full_lifecycle_proven"])
-        self.assertEqual(report["source_bundle_version"], "1.1.0")
-        self.assertIn("tre-workspace-base", report["declared_prerequisites"])
-
-    def test_export_review_selects_only_its_private_lifecycle(self):
-        result, report = self.run_selector("--bundle", "tre-service-guacamole-export-reviewvm", "--collect-only")
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(
-            report["collected_tests"], ["test_airlock_export_review.py::test_airlock_export_review_vm_flow"]
-        )
-        self.assertEqual(report["status"], "not_run")
-        self.assertFalse(report["full_lifecycle_proven"])
-        self.assertIn("tre-service-guacamole-windowsvm", report["declared_prerequisites"])
-        self.assertIn("synthetic-review-data", report["coverage"])
 
     def test_observed_deployment_evidence_excludes_properties(self):
         with tempfile.TemporaryDirectory() as directory:

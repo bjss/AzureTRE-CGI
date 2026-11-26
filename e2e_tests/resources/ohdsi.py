@@ -1,4 +1,4 @@
-"""Read OHDSI infrastructure without requesting application settings or secrets."""
+"""Read OHDSI infrastructure without requesting the values of application settings or secrets."""
 
 import asyncio
 from copy import deepcopy
@@ -62,6 +62,15 @@ def resource_ids(settings, workspace_id, service_id):
         for key, app in apps.items()
     }
     storage = f"{group}/providers/Microsoft.Storage/storageAccounts/{('stg' + ws[-8:]).replace('-', '').lower()}"
+    vault = f"{group}/providers/Microsoft.KeyVault/vaults/kv-{ws[-20:].lower()}"
+    # The Web API reads these secrets through its Key Vault references.
+    secrets = (
+        f"jdbc-connectionstring-{service_id[-4:]}",
+        f"ohdsi-admin-password-{service_id[-4:]}",
+        f"ohdsi-app-password-{service_id[-4:]}",
+        "workspace-client-id",
+        "workspace-client-secret",
+    )
     ids = {
         "group": group,
         "vnet": vnet,
@@ -72,7 +81,8 @@ def resource_ids(settings, workspace_id, service_id):
         "nsg": f"{group}/providers/Microsoft.Network/networkSecurityGroups/nsg-psql-{suffix}",
         "identity": f"{group}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-ohdsi-webapi-{suffix}",
         "share": f"{storage}/fileServices/default/shares/atlas-{suffix}",
-        "vault": f"{group}/providers/Microsoft.KeyVault/vaults/kv-{ws[-20:].lower()}",
+        "vault": vault,
+        "secrets": [f"{vault}/secrets/{name}" for name in secrets],
         "web_zone": f"{settings.group}/providers/Microsoft.Network/privateDnsZones/privatelink.azurewebsites.net",
         "pg_zone": f"{settings.group}/providers/Microsoft.Network/privateDnsZones/privatelink.postgres.database.azure.com",
     }
@@ -204,7 +214,10 @@ async def validate_resources(arm, settings, ids, tags):
         assert require_uuid(identity["properties"].get("tenantId")) == settings.tenant
         principal = require_uuid(identity["properties"].get("principalId"))
         assignments = await arm.request(
-            "GET", ids["vault"] + "/providers/Microsoft.Authorization/roleAssignments", ROLE_API
+            "GET",
+            ids["vault"] + "/providers/Microsoft.Authorization/roleAssignments",
+            ROLE_API,
+            query=principal_filter(principal),
         )
         assert isinstance(assignments.get("value"), list) and not assignments.get("nextLink"), (
             "Incomplete OHDSI role inventory"
@@ -212,20 +225,49 @@ async def validate_resources(arm, settings, ids, tags):
         roles = [
             r["properties"] for r in assignments["value"] if r["properties"].get("principalId", "").lower() == principal
         ]
-        assert len(roles) == 1, "Unexpected OHDSI vault role count"
-        same_id(roles[0].get("scope"), ids["vault"])
-        assert roles[0].get("roleDefinitionId", "").rsplit("/", 1)[-1].lower() == SECRETS_USER
+        # One role on each secret, and no role on the vault or above it.
+        scopes = sorted(r.get("scope", "").lower() for r in roles)
+        assert scopes == sorted(s.lower() for s in ids["secrets"]), "Unexpected OHDSI secret role scopes"
+        assert all(r.get("roleDefinitionId", "").rsplit("/", 1)[-1].lower() == SECRETS_USER for r in roles)
+        # The roles on the secrets must let the Web API resolve each of its Key Vault references.
+        references = await key_vault_references(arm, ids["apps"]["webapi"])
+        names = {r.get("secretName", "").lower() for r in references}
+        assert names == {s.rsplit("/", 1)[1].lower() for s in ids["secrets"]}, "Unexpected OHDSI Key Vault references"
+        statuses = sorted({str(r.get("status")) for r in references})
+        assert statuses == ["Resolved"], f"OHDSI Key Vault references are not resolved: {statuses}"
         return principal
 
 
-def firewall_rules(resource):
+async def key_vault_references(arm, site_id, attempts=10):
+    """Read the Key Vault references of a web app. Azure returns the status of each reference, not the value."""
+    for attempt in range(attempts):
+        page = await arm.request("GET", site_id + "/config/configreferences/appsettings", WEB_API)
+        assert isinstance(page.get("value"), list) and not page.get("nextLink"), "Incomplete OHDSI Key Vault references"
+        references = [r.get("properties", {}) for r in page["value"]]
+        # The web app resolves its references when it starts, so a new web app can show an earlier status.
+        if (references and all(r.get("status") == "Resolved" for r in references)) or attempt == attempts - 1:
+            return references
+        await asyncio.sleep(30)
+
+
+# Other services add and remove their own collections while this case runs.
+SERVICE_COLLECTION = re.compile(r"(?:nrc|arc)_svc_([0-9a-f-]{36})")
+
+
+def other_service(collection, service_id):
+    match = SERVICE_COLLECTION.match(collection.get("name", ""))
+    return match is not None and match.group(1) != service_id
+
+
+def firewall_rules(resource, service_id=None):
     return {
-        key: deepcopy(resource["properties"].get(key, [])) for key in ("network_rule_collections", "rule_collections")
+        key: [deepcopy(c) for c in resource["properties"].get(key, []) if not other_service(c, service_id)]
+        for key in ("network_rule_collections", "rule_collections")
     }
 
 
 def validate_firewall(resource, baseline, service_id, prefixes):
-    rules = firewall_rules(resource)
+    rules = firewall_rules(resource, service_id)
     for key, prefix in (("network_rule_collections", "nrc"), ("rule_collections", "arc")):
         name = f"{prefix}_svc_{service_id}"
         matches = [c for c in rules[key] if c.get("name") == name]
@@ -260,10 +302,20 @@ async def assert_removed(arm, identifiers):
                 await asyncio.sleep(10)
 
 
+def principal_filter(principal):
+    # With this filter, Azure returns the roles of the principal at, above and below the scope.
+    return {"$filter": f"principalId eq '{principal}'"}
+
+
 async def assert_roles_removed(arm, vault, principal):
     async with asyncio.timeout(5 * 60):
         while True:
-            roles = await arm.request("GET", vault + "/providers/Microsoft.Authorization/roleAssignments", ROLE_API)
+            roles = await arm.request(
+                "GET",
+                vault + "/providers/Microsoft.Authorization/roleAssignments",
+                ROLE_API,
+                query=principal_filter(principal),
+            )
             assert isinstance(roles.get("value"), list) and not roles.get("nextLink"), (
                 "Incomplete OHDSI cleanup role inventory"
             )

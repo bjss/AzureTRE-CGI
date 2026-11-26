@@ -62,16 +62,14 @@ async def test_private_fhir_access_and_dicom_update(verify):
     async with sql_lifecycle(verify, deadline_variable="HEALTH_VALIDATION_DEADLINE") as resources:
         # The bundle refuses to install without the workspace owners group.
         workspace_path, workspace_id, guacamole_path, guacamole_id = await resources.setup(groups=True)
-        new_token = partial(get_workspace_owner_token, workspace_id, verify)
-        workspace = (await get_resource(f"/api{workspace_path}", await new_token(), verify))["workspace"]
+        # The owner token gets a current token for each request, so one token lasts the case and its clean-up.
+        token = await get_workspace_owner_token(workspace_id, verify)
+        workspace = (await get_resource(f"/api{workspace_path}", token, verify))["workspace"]
         assert workspace["properties"].get("workspace_owners_group_id"), "The workspace has no owners group"
         health_path, health_id = await resources.create(
-            HEALTH_PAYLOAD, f"/api{workspace_path}/workspace-services", await new_token(), cleanup_token=new_token
+            HEALTH_PAYLOAD, f"/api{workspace_path}/workspace-services", token
         )
-        vm_path, vm_id = await resources.create(
-            VM_PAYLOAD, f"/api{guacamole_path}/user-resources", await new_token(), cleanup_token=new_token
-        )
-        token = await new_token()
+        vm_path, vm_id = await resources.create(VM_PAYLOAD, f"/api{guacamole_path}/user-resources", token)
         health = (await get_resource(f"/api{health_path}", token, verify))["workspaceService"]
         vm_properties = (await get_resource(f"/api{vm_path}", token, verify))["userResource"]["properties"]
         subscription_id = vm_properties.get("workspace_subscription_id") or os.environ["ARM_SUBSCRIPTION_ID"]
@@ -96,7 +94,6 @@ async def test_private_fhir_access_and_dicom_update(verify):
             LOGGER.info("FHIR metadata is private, and data requests need a token and a role")
             async with role_access(arm, fhir_id, FHIR_DATA_CONTRIBUTOR, vm["identity"]["principalId"], subscription_id):
                 await probe(phase="write")
-                token = await new_token()
                 health = (await get_resource(f"/api{health_path}", token, verify))["workspaceService"]
                 async with asyncio.timeout(60 * 60):
                     await post_resource(
@@ -107,7 +104,7 @@ async def test_private_fhir_access_and_dicom_update(verify):
                         method="PATCH",
                         etag=health["_etag"],
                     )
-                health = (await get_resource(f"/api{health_path}", await new_token(), verify))["workspaceService"]
+                health = (await get_resource(f"/api{health_path}", token, verify))["workspaceService"]
                 assert health["properties"]["dicom_url"] == dicom_url
                 dicom_id = f"{workspace_arm_id}/dicomservices/dicom{suffix}"
                 dicom = await arm.request("GET", dicom_id, HEALTH_API)
@@ -125,8 +122,9 @@ async def test_private_fhir_access_and_dicom_update(verify):
                     client, {"fhir": f"{fhir_url}/metadata", "dicom": f"{dicom_url}/health/check"}
                 )
             # Read the resources again after the update.
-            # FHIR is not in this list: Azure keeps publicNetworkAccess Enabled on FHIR, also after a request
-            # sets Disabled. The private endpoint on the workspace blocks public traffic to FHIR (checked above).
+            # FHIR is not in this list, because the bundle does not set publicNetworkAccess on FHIR. FHIR from
+            # Health 1.0.0 reports Disabled, but FHIR from 0.3.8 reports Enabled, also after a request sets
+            # Disabled. The public requests above make sure that the private endpoint blocks FHIR.
             network = {}
             for name, resource_id in (("workspace", workspace_arm_id), ("dicom", dicom_id)):
                 record = await arm.request("GET", resource_id, HEALTH_API)

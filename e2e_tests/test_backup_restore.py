@@ -11,7 +11,7 @@ from starlette import status
 
 from e2e_tests import config
 from e2e_tests.conftest import get_workspace_owner_token
-from e2e_tests.helpers import get_admin_token, get_auth_header, get_full_endpoint
+from e2e_tests.helpers import assert_status, get_admin_token, get_auth_header, get_full_endpoint
 from e2e_tests.resources import strings
 from e2e_tests.resources.backup import (
     BACKUP_API,
@@ -63,26 +63,42 @@ VM_PAYLOAD = {
 async def test_file_share_restore_and_workspace_delete(verify, delete_backups):
     if os.environ.get("AZURE_ENVIRONMENT", "AzureCloud") != "AzureCloud":
         raise ValueError("The backup probe currently supports AzureCloud only")
+    # The case does not set workspace_subscription_id, so the workspace is in the core subscription.
+    subscription_id = os.environ["ARM_SUBSCRIPTION_ID"]
     properties = {"enable_backup": True, "delete_backups_on_uninstall": delete_backups}
     async with sql_lifecycle(verify, deadline_variable="BACKUP_VALIDATION_DEADLINE") as resources:
+        found = {}
+
+        def own_kept_backup(workspace_path, workspace_id):
+            resource_names = names(workspace_id, config.TRE_ID)
+            group = f"/subscriptions/{subscription_id}/resourceGroups/{resource_names['group']}"
+            found.update(
+                group_id=group,
+                vault_id=f"{group}/providers/Microsoft.RecoveryServices/vaults/{resource_names['vault']}",
+                account_id=f"{group}/providers/Microsoft.Storage/storageAccounts/{resource_names['account']}",
+            )
+            # This runs after the workspace delete. The case owns it when the API accepts the workspace create.
+            # The clean-up of a failed install also deletes the workspace and keeps its backup resources.
+            resources.own_last(
+                "retained backup",
+                remove_kept_backup,
+                workspace_path,
+                workspace_id,
+                group,
+                found["vault_id"],
+                found["account_id"],
+                verify,
+            )
+
         workspace_path, workspace_id, guacamole_path, guacamole_id = await resources.setup(
-            workspace_properties=properties
+            workspace_properties=properties, workspace_accepted=own_kept_backup
         )
-        new_token = partial(get_workspace_owner_token, workspace_id, verify)
-        workspace = (await get_resource(f"/api{workspace_path}", await new_token(), verify))["workspace"]
-        subscription_id = workspace["properties"].get("workspace_subscription_id") or os.environ["ARM_SUBSCRIPTION_ID"]
+        # The owner token gets a current token for each request, so one token lasts the case and its clean-up.
+        token = await get_workspace_owner_token(workspace_id, verify)
+        group_id, vault_id, account_id = found["group_id"], found["vault_id"], found["account_id"]
         resource_names = names(workspace_id, config.TRE_ID)
-        group_id = f"/subscriptions/{subscription_id}/resourceGroups/{resource_names['group']}"
-        vault_id = f"{group_id}/providers/Microsoft.RecoveryServices/vaults/{resource_names['vault']}"
-        account_id = f"{group_id}/providers/Microsoft.Storage/storageAccounts/{resource_names['account']}"
-        # This runs after the workspace delete, also when the case fails before it.
-        resources.own_last(
-            "retained backup", remove_kept_backup, workspace_path, group_id, vault_id, account_id, verify
-        )
-        vm_path, vm_id = await resources.create(
-            VM_PAYLOAD, f"/api{guacamole_path}/user-resources", await new_token(), cleanup_token=new_token
-        )
-        vm_properties = (await get_resource(f"/api{vm_path}", await new_token(), verify))["userResource"]["properties"]
+        vm_path, vm_id = await resources.create(VM_PAYLOAD, f"/api{guacamole_path}/user-resources", token)
+        vm_properties = (await get_resource(f"/api{vm_path}", token, verify))["userResource"]["properties"]
         azure_vm_id = vm_properties["azure_resource_id"]
         probe_id = uuid4().hex
         async with arm_client() as arm:
@@ -134,15 +150,17 @@ async def test_file_share_restore_and_workspace_delete(verify, delete_backups):
             LOGGER.info("The retained recovery point restored after the workspace delete")
 
 
-async def remove_kept_backup(workspace_path, group_id, vault_id, account_id, verify):
+async def remove_kept_backup(workspace_path, workspace_id, group_id, vault_id, account_id, verify):
     """Remove the vault and the resource group that a delete with retained backups keeps."""
     # A workspace that the API did not delete stays as it is, so that its failure can be examined.
     async with AsyncClient(verify=verify, timeout=60) as client:
         response = await client.get(
             get_full_endpoint(f"/api{workspace_path}"), headers=get_auth_header(await get_admin_token(verify))
         )
-    if response.status_code != status.HTTP_404_NOT_FOUND:
-        LOGGER.warning("The workspace is not deleted (HTTP %s), so its backup resources stay", response.status_code)
+    if response.status_code == status.HTTP_200_OK:
+        LOGGER.warning("The workspace is not deleted, so its backup resources stay")
         return
+    # Another status does not show that the workspace exists. The clean-up fails, so that the report shows it.
+    assert_status(response, [status.HTTP_404_NOT_FOUND], "Could not read the workspace before the kept backup removal")
     async with arm_client() as arm:
-        await remove_retained_backup(arm, group_id, vault_id, account_id)
+        await remove_retained_backup(arm, workspace_id, group_id, vault_id, account_id)

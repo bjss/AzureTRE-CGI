@@ -90,10 +90,10 @@
       "limitations": [
         "Requires AzureCloud, accepted CycleCloud marketplace image terms, the regional image and Standard_D4s_v5 capacity. The test does not accept terms or change quotas.",
         "Requires an empty CycleCloud slot, current firewall and one writer in a dedicated environment. The fixed DNS zone prevents parallel CycleCloud services.",
-        "Checks VM power actions, ARM configuration, TRE firewall rules, same-version metadata upgrade and bounded cleanup. Previous-version upgrades remain unproven.",
+        "Checks VM power actions, ARM configuration, TRE firewall rules, the network rules of the VM network card, a same-version update of the metadata and cluster address spaces, and bounded cleanup. Reads the network rules from ARM and does not send traffic from a workspace. Previous-version upgrades remain unproven.",
         "Does not configure the CycleCloud application, create HPC clusters or prove browser access, private DNS reachability or application TLS trust.",
         "The existing bundle grants its VM subscription Contributor and allows SharedSubnet access to ARM and GitHub. Storage public access is not disabled by this bundle. These controls do not prove workspace isolation.",
-        "Cleanup verifies the VM, disk, NIC, storage, private endpoint, DNS zone, captured identity roles and firewall rules. Key Vault credentials can remain soft-deleted; secret purge is not attempted."
+        "Cleanup verifies the VM, disk, NIC, network security group, storage, private endpoint, DNS zone, captured identity roles and firewall rules. Key Vault credentials can remain soft-deleted; secret purge is not attempted."
       ],
       "unavailable_reason": ""
     },
@@ -101,25 +101,13 @@
       "manifest": "templates/shared_services/databricks-auth/porter.yaml",
       "family": "shared_service",
       "prerequisites": [],
-      "tests": [
-        "test_databricks.py::test_private_auth_lifecycle"
-      ],
-      "related_tests": [
-        "test_databricks.py::test_private_databricks_lifecycle"
-      ],
-      "coverage": [
-        "install",
-        "private-configuration",
-        "uninstall",
-        "api-removal",
-        "arm-resource-removal"
-      ],
+      "tests": [],
+      "related_tests": [],
+      "coverage": [],
       "limitations": [
-        "Requires an isolated AzureCloud TRE with no workspaces, no Databricks authentication service and an empty Databricks private DNS zone. Run one writer and one test process. Existing resources are never adopted.",
-        "Checks ARM configuration and DNS records, not browser sign-in, private DNS reachability, cluster or notebook execution, user access or previous-version upgrades. These bundles define no custom actions.",
-        "A failed dependent cleanup retains the authentication service. Preflight and deletion checks do not provide an atomic lock against concurrent deployments."
+        "Functional, upgrade and custom-action coverage must be assessed separately."
       ],
-      "unavailable_reason": ""
+      "unavailable_reason": "No dedicated shared-service lifecycle case (#5154)."
     },
     "tre-shared-service-firewall": {
       "manifest": "templates/shared_services/firewall/porter.yaml",
@@ -185,21 +173,15 @@
         "tre-workspace-base"
       ],
       "tests": [
-        "test_aml.py::test_private_aml_service_lifecycle"
+        "test_workspace_services.py::test_install_workspace_service[tre-service-azureml]"
       ],
-      "related_tests": [
-        "test_aml.py::test_private_aml_compute_lifecycle"
-      ],
+      "related_tests": [],
       "coverage": [
         "install",
-        "private-configuration",
-        "uninstall",
-        "api-removal",
-        "arm-resource-removal"
+        "uninstall"
       ],
       "limitations": [
-        "Requires AzureCloud, matching authentication and Azure tenants, Automatic workspace creation and automatic workspace groups. Creates an owned workspace; configured workspace IDs are not reused.",
-        "Checks the AML workspace ARM record. Notebook execution, user access, prior-version upgrades and complete physical cleanup of all dependent resources remain unproven."
+        "Functional, upgrade and custom-action coverage must be assessed separately."
       ],
       "unavailable_reason": ""
     },
@@ -210,25 +192,13 @@
         "tre-workspace-base",
         "tre-service-azureml"
       ],
-      "tests": [
-        "test_aml.py::test_private_aml_compute_lifecycle"
-      ],
+      "tests": [],
       "related_tests": [],
-      "coverage": [
-        "install",
-        "private-configuration",
-        "assigned-user",
-        "running-state",
-        "uninstall",
-        "api-removal",
-        "arm-resource-removal"
-      ],
+      "coverage": [],
       "limitations": [
-        "Requires the Automatic workspace and private Azure ML parent, AzureCloud, matching tenants and an explicit TEST_AML_USER_OBJECT_ID for an existing Entra user. No roles or group memberships are added by the test.",
-        "The user input receives UUID format validation only; the test does not query the directory or prove user access. Regional Standard_D2_v3 capacity and AML quota must be available.",
-        "ARM state and configuration do not prove notebook execution or user access. Prior-version upgrades and complete physical cleanup of all dependent resources remain unproven. The bundle defines no custom actions."
+        "Functional, upgrade and custom-action coverage must be assessed separately."
       ],
-      "unavailable_reason": ""
+      "unavailable_reason": "Bundle publication, registration and lifecycle coverage are missing (#5127)."
     },
     "tre-workspace-service-azuresql": {
       "manifest": "templates/workspace_services/azuresql/porter.yaml",
@@ -252,7 +222,7 @@
       ],
       "limitations": [
         "AzureCloud only. Requires permission to run commands on a test-created workspace VM and create a temporary secret-scoped role assignment.",
-        "Configuration upgrade uses the current bundle version. Previous-version migration remains separate (#5128). The SQL bundle has no custom actions."
+        "Configuration upgrade uses the current bundle version. Previous-version migration remains separate. The SQL bundle has no custom actions."
       ],
       "unavailable_reason": ""
     },
@@ -260,28 +230,15 @@
       "manifest": "templates/workspace_services/databricks/porter.yaml",
       "family": "workspace_service",
       "prerequisites": [
-        "tre-workspace-base",
-        "tre-shared-service-firewall",
-        "tre-shared-service-databricks-private-auth"
+        "tre-workspace-base"
       ],
-      "tests": [
-        "test_databricks.py::test_private_databricks_lifecycle"
-      ],
+      "tests": [],
       "related_tests": [],
-      "coverage": [
-        "install",
-        "private-configuration",
-        "uninstall",
-        "api-removal",
-        "arm-resource-removal"
-      ],
+      "coverage": [],
       "limitations": [
-        "Requires an isolated AzureCloud TRE with no workspaces, no Databricks authentication service and an empty Databricks private DNS zone. Run one writer and one test process. Existing resources are never adopted.",
-        "Checks ARM configuration and DNS records, not browser sign-in, private DNS reachability, cluster or notebook execution, user access or previous-version upgrades. These bundles define no custom actions.",
-        "A failed dependent cleanup retains the authentication service. Preflight and deletion checks do not provide an atomic lock against concurrent deployments.",
-        "Requires a deployed checkout-version firewall and complete regional endpoint data. The service pipeline changes the parent VNet and shared firewall. ARM provisioning does not prove that regional endpoints remain current. Managed storage names use only the last four service-ID characters and can collide globally."
+        "Functional, upgrade and custom-action coverage must be assessed separately."
       ],
-      "unavailable_reason": ""
+      "unavailable_reason": "Missing workspace-service case and parametrisation (#5126)."
     },
     "tre-workspace-service-gitea": {
       "manifest": "templates/workspace_services/gitea/porter.yaml",
@@ -302,13 +259,16 @@
         "private Gitea API through private DNS",
         "anonymous and wrong-password requests denied",
         "private repository write/read with the admin account",
-        "update and app restart with retained repository data",
+        "update, app stop and app start with retained repository data",
+        "one Gitea stop after an OIDC setting change",
+        "Key Vault references resolved for the admin, OIDC client and database secrets",
+        "no secret or new access token in the web app console log",
         "public network access disabled",
         "uninstall"
       ],
       "limitations": [
         "AzureCloud only. Requires permission to run commands on a test-created workspace VM and create a temporary secret-scoped role assignment.",
-        "The case uses the admin account, not OpenID sign-in or researcher identities. The update uses the current bundle version. Previous-version migration remains separate (#5128)."
+        "The case uses the admin account, not OpenID sign-in or researcher identities. The update uses the current bundle version. Previous-version migration remains separate."
       ],
       "unavailable_reason": ""
     },
@@ -340,29 +300,16 @@
         "tre-workspace-base",
         "tre-service-guacamole",
         "tre-shared-service-certs",
-        "tre-shared-service-sonatype-nexus",
-        "tre-service-guacamole-windowsvm"
+        "tre-shared-service-sonatype-nexus"
       ],
-      "tests": [
-        "test_airlock_export_review.py::test_airlock_export_review_vm_flow"
-      ],
+      "tests": [],
       "related_tests": [],
-      "coverage": [
-        "install",
-        "synthetic-review-data",
-        "old-draft-sas-writes-after-submission",
-        "review-copy-integrity",
-        "export-approval",
-        "approved-copy-integrity",
-        "automatic-uninstall"
-      ],
+      "coverage": [],
       "limitations": [
-        "Requires AzureCloud, a manual test workspace app with WorkspaceOwner and AirlockManager, and CI Run Command permission.",
-        "Creates its own workspace, Guacamole service and Windows upload VM. It does not reuse configured workspace or service IDs.",
-        "Requires a suitable Nexus instance or explicit Nexus EULA consent to create prerequisites.",
-        "Interactive desktop access, access-denial cases, rejected exports, upgrades, custom actions and physical resource removal need separate evidence."
+        "Functional, upgrade and custom-action coverage must be assessed separately.",
+        "Requires a suitable Nexus instance or explicit Nexus EULA consent to create prerequisites (#5182)."
       ],
-      "unavailable_reason": ""
+      "unavailable_reason": "No isolated export-review VM lifecycle case (#5127)."
     },
     "tre-service-guacamole-import-reviewvm": {
       "manifest": "templates/workspace_services/guacamole/user_resources/guacamole-azure-import-reviewvm/porter.yaml",
@@ -459,7 +406,7 @@
       ],
       "limitations": [
         "AzureCloud only. Requires permission to run commands on a test-created workspace VM and create a temporary service-scoped role assignment.",
-        "The case does not use DICOM data, FHIR STU3 or researcher identities. The update uses the current bundle version. Previous-version migration remains separate (#5128)."
+        "The case does not use DICOM data, FHIR STU3 or researcher identities. The update uses the current bundle version. Previous-version migration remains separate."
       ],
       "unavailable_reason": ""
     },
@@ -487,7 +434,7 @@
       ],
       "limitations": [
         "AzureCloud only. Requires a suitable Nexus instance or explicit Nexus EULA consent, permission to run commands on a test-created workspace VM and a temporary secret-scoped role assignment.",
-        "The SKU change uses the current bundle version. Previous-version migration remains separate (#5128). The MySQL bundle has no custom actions."
+        "The SKU change uses the current bundle version. Previous-version migration remains separate. The MySQL bundle has no custom actions."
       ],
       "unavailable_reason": ""
     },
@@ -541,7 +488,7 @@
         "active-account-removal"
       ],
       "limitations": [
-        "Requires AzureCloud, a registered 1.1.0 template, regional Standard model availability and subscription quota read access. Preflight does not reserve Azure capacity.",
+        "Requires AzureCloud, a registered 1.1.0 or later template, regional Standard model availability and subscription quota read access. Preflight does not reserve Azure capacity.",
         "Uses the workspace subscription and actual resource-group region. A workspace in a different subscription from ARM_SUBSCRIPTION_ID is unsupported by this bundle.",
         "Does not prove private inference, researcher access, model upgrades, private endpoint connectivity, secret removal or soft-deleted account purge."
       ],
