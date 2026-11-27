@@ -1,7 +1,7 @@
 ---
 schemaVersion: 1.0.0
 name: tre-shared-service-databricks-private-auth
-version: 0.1.16
+version: 0.1.17
 description: "An Azure TRE shared service for Azure Databricks authentication."
 registry: azuretre
 dockerfile: Dockerfile.tmpl
@@ -42,6 +42,11 @@ parameters:
     env: ARM_ENVIRONMENT
     type: string
     default: "public"
+  - name: azure_environment
+    env: AZURE_ENVIRONMENT
+    type: string
+    default: "AzureCloud"
+    description: "Used by Azure CLI to set the Azure environment"
 
 outputs:
   - name: databricks_workspace_name
@@ -53,6 +58,8 @@ outputs:
 mixins:
   - terraform:
       clientVersion: 1.9.8
+  - az:
+      clientVersion: 2.81.0
 
 install:
   - terraform:

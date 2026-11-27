@@ -253,6 +253,7 @@ jobs:
       TEST_WORKSPACE_APP_SECRET: "${{ secrets.TEST_WORKSPACE_APP_SECRET }}"
       TEST_ACCOUNT_CLIENT_ID: "${{ secrets.TEST_ACCOUNT_CLIENT_ID }}"
       TEST_ACCOUNT_CLIENT_SECRET: "${{ secrets.TEST_ACCOUNT_CLIENT_SECRET }}"
+      TEST_AML_USER_OBJECT_ID: "${{ secrets.TEST_AML_USER_OBJECT_ID }}"
       TRE_ID: ${{ needs.prepare_pr_env.outputs.treid }}
       CI_CACHE_ACR_NAME: ${{ secrets.ACR_NAME }}
       ENCRYPTION_KV_NAME: ${{ format('{0}mgmt', needs.prepare_pr_env.outputs.treid) }}
